@@ -2,15 +2,15 @@
 
 A macOS menu bar app that takes meeting notes the way [Granola](https://granola.ai) does: no bot joins the call. It listens to your microphone and to whatever your Mac plays, transcribes both on-device, and turns the transcript and your own notes into structured notes with Grok when the call ends. A built-in MCP server lets Cursor and other AI tools search and read your meetings.
 
-It is a personal project, written in Swift with no third-party dependencies, and not affiliated with Granola.
+It is a personal project, written in Swift, and not affiliated with Granola.
 
 ## How it works
 
 Your Mac already hears both sides of a call: your voice comes in through the microphone, and everyone else comes out of the speakers. The app records these as two separate streams, so it knows who said what without guessing. The microphone is "Me"; system audio is "Them".
 
-- **System audio** comes from a Core Audio process tap (macOS 14.2+), the same API Granola uses. There's no virtual audio driver to install.
+- **System audio** comes from a Core Audio process tap (macOS 14.2+), the same API Granola uses. There's no virtual audio driver to install. When the meeting started from a detected app, the tap records only that app and its helper processes, so a video in another app stays out of the transcript.
 - **Microphone audio** runs through Apple's voice processing, which cancels echo when you take calls on speakers. A text-level filter drops anything the canceller misses.
-- **Transcription** uses Apple's on-device `SpeechAnalyzer` (macOS 26). It is free, private and streams words as they're spoken. Audio is never written to disk.
+- **Transcription** uses Apple's on-device `SpeechAnalyzer` (macOS 26). It is free, private and streams words as they're spoken. The audio is also saved for 7 days under `~/Library/Application Support/NativeGranola/Audio` for processing after the call. You can turn that off or change how long it's kept.
 - **Notes** come from Grok, through the xAI API, once the call ends. It works from the transcript, your typed notes and the calendar event. Templates shape the output for 1:1s, sales calls, standups, interviews and more.
 - **Meeting detection** watches your calendar and shows a prompt a minute before events with two or more attendees. It also notices when Zoom, Teams, Slack, FaceTime or a browser starts using the microphone, and offers to take notes. When that app releases the mic, the app stops recording and writes the notes.
 - **Storage** is a local SQLite database with full-text search, at `~/Library/Application Support/NativeGranola/granola.sqlite`.
@@ -20,6 +20,12 @@ Your Mac already hears both sides of a call: your voice comes in through the mic
 - macOS 26 or later, on Apple Silicon
 - Swift 6.2 or later. The Command Line Tools are enough; Xcode is not required.
 - An [xAI API key](https://console.x.ai) for AI notes. Recording and transcription work without one.
+
+## Install
+
+Signed builds will be published on [Releases](https://github.com/agrimsingh/native-granola/releases). Until the first one, build from source as described below.
+
+Builds marked "unsigned" aren't notarized, so macOS blocks the first launch. Open System Settings > Privacy & Security and click Open Anyway, or run `xattr -dr com.apple.quarantine /Applications/NativeGranola.app`. An unsigned build also has a different signature each time, so macOS asks for permissions again after every update.
 
 ## Build and run
 
@@ -77,6 +83,8 @@ open -W -n build/NativeGranola.app --args --selftest enhance out.json
 
 `record` captures live audio; pair it with `say` and `afplay` to test system-audio capture end to end.
 
+`scripts/release.sh 0.2.0` builds the zip, DMG and checksums into `dist/`. Pushing a `v*` tag runs the same thing on GitHub. With a Developer ID certificate and notarization credentials in the repo secrets (see `.github/workflows/release.yml`), the build is signed and notarized; without them, it's published as an unsigned prerelease.
+
 The code lives in five modules:
 
 | Module | Contents |
@@ -91,7 +99,7 @@ The code lives in five modules:
 
 ## Limitations
 
-- System audio means everything your Mac plays. Music or a video in another tab lands in the transcript.
+- Meetings started by hand, and meetings in a browser tab, record all of the browser's or the Mac's audio. Music or a video playing in the same place lands in the transcript.
 - Everyone on the far side of a call is "Them"; the app doesn't tell remote speakers apart.
 - Transcription languages are whatever Apple's on-device model supports for your locale.
 - Echo cancellation, the call-detection prompts and Notion export pass their tests but have had little real-world use.
