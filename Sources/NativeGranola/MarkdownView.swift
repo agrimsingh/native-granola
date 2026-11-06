@@ -6,11 +6,13 @@ struct MarkdownView: View {
     let markdown: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ForEach(Array(Self.blocks(markdown).enumerated()), id: \.offset) { _, block in
-                view(for: block)
+        VStack(alignment: .leading, spacing: 7) {
+            ForEach(Array(Self.blocks(markdown).enumerated()), id: \.offset) { index, block in
+                view(for: block, isFirst: index == 0)
             }
         }
+        .font(.system(size: 14))
+        .lineSpacing(3)
         .textSelection(.enabled)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -46,35 +48,43 @@ struct MarkdownView: View {
     }
 
     @ViewBuilder
-    private func view(for block: Block) -> some View {
+    private func view(for block: Block, isFirst: Bool) -> some View {
         switch block {
         case let .heading(level, text):
             inline(text)
-                .font(level <= 1 ? .title2.bold() : level == 2 ? .title3.bold() : .headline)
-                .padding(.top, 8)
+                .font(level <= 1 ? .system(size: 20, weight: .bold)
+                      : level == 2 ? .system(size: 16, weight: .semibold)
+                      : .system(size: 14, weight: .semibold))
+                .padding(.top, isFirst ? 0 : (level <= 2 ? 16 : 8))
+                .padding(.bottom, 1)
         case let .bullet(indent, text):
-            row(indent: indent, marker: Text("•").foregroundStyle(.secondary), text: text)
+            row(indent: indent, marker: Circle().fill(.tertiary).frame(width: 5, height: 5)
+                .alignmentGuide(.firstTextBaseline) { $0[.bottom] + 1.5 }, text: text)
         case let .todo(indent, done, text):
-            row(indent: indent, marker: Image(systemName: done ? "checkmark.square.fill" : "square").foregroundStyle(.secondary), text: text)
+            row(indent: indent,
+                marker: Image(systemName: done ? "checkmark.square.fill" : "square")
+                    .foregroundStyle(done ? Theme.accent : .secondary),
+                text: text)
         case let .numbered(indent, number, text):
             row(indent: indent, marker: Text("\(number).").foregroundStyle(.secondary).monospacedDigit(), text: text)
         case let .quote(text):
-            HStack(spacing: 8) {
-                RoundedRectangle(cornerRadius: 1).fill(.tertiary).frame(width: 3)
+            HStack(spacing: 10) {
+                Capsule().fill(Theme.accent.opacity(0.6)).frame(width: 3)
                 inline(text).foregroundStyle(.secondary)
             }
+            .fixedSize(horizontal: false, vertical: true)
         case let .paragraph(text):
             inline(text)
         case .divider:
-            Divider().padding(.vertical, 4)
+            Divider().padding(.vertical, 6)
         }
     }
 
     private func row(indent: Int, marker: some View, text: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            marker.frame(minWidth: 14, alignment: .trailing)
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            marker.frame(minWidth: 14, alignment: .center)
             inline(text)
         }
-        .padding(.leading, CGFloat(indent) * 18)
+        .padding(.leading, CGFloat(indent) * 22 + 2)
     }
 }
