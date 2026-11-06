@@ -64,14 +64,18 @@ private struct AISettings: View {
     }
 
     private var placeholder: String {
-        Secrets.shared.source(of: .xaiAPIKey).map { "Saved (\($0.rawValue))" } ?? "xai-…"
+        switch Secrets.shared.source(of: .xaiAPIKey) {
+        case .keychain: "Saved"
+        case .environment: "From $\(SecretKey.xaiAPIKey.environmentVariable)"
+        case nil: "xai-…"
+        }
     }
 
     private func save() {
         do {
             try Secrets.shared.set(key, for: .xaiAPIKey)
             key = ""
-            status = "Saved to Keychain"
+            status = "Saved"
             Task { await loadModels() }
         } catch { status = error.localizedDescription }
     }

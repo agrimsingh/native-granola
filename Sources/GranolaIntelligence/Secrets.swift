@@ -1,4 +1,5 @@
 import Foundation
+import GranolaCore
 import Security
 
 public enum SecretKey: String, CaseIterable, Sendable {
@@ -73,6 +74,86 @@ public struct SystemKeychain: KeychainStore {
     }
 }
 
+/// Secrets in a JSON file only the current user can read. Used instead of the login keychain because
+/// macOS ties a keychain item to the code hash of a self-signed app, so every rebuild asks for the
+/// login password again.
+public final class FileSecretStore: KeychainStore, @unchecked Sendable {
+    public static var defaultURL: URL {
+        Store.defaultURL.deletingLastPathComponent().appendingPathComponent("secrets.json")
+    }
+
+    private let url: URL
+    private let lock = NSLock()
+
+    public init(url: URL = FileSecretStore.defaultURL) { self.url = url }
+
+    private func key(_ service: String, _ account: String) -> String { "\(service)/\(account)" }
+
+    private func load() throws -> [String: String] {
+        guard let data = try? Data(contentsOf: url) else { return [:] }
+        return try JSONDecoder().decode([String: String].self, from: data)
+    }
+
+    private func save(_ items: [String: String]) throws {
+        let fm = FileManager.default
+        let dir = url.deletingLastPathComponent()
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        let tmp = url.path + ".tmp"
+        guard fm.createFile(atPath: tmp, contents: try JSONEncoder().encode(items), attributes: [.posixPermissions: 0o600]),
+              rename(tmp, url.path) == 0
+        else { throw CocoaError(.fileWriteUnknown) }
+    }
+
+    public func read(service: String, account: String) throws -> String? {
+        try lock.withLock { try load()[key(service, account)] }
+    }
+
+    public func write(_ value: String, service: String, account: String) throws {
+        try lock.withLock {
+            var items = try load()
+            items[key(service, account)] = value
+            try save(items)
+        }
+    }
+
+    public func delete(service: String, account: String) throws {
+        try lock.withLock {
+            var items = try load()
+            guard items.removeValue(forKey: key(service, account)) != nil else { return }
+            try save(items)
+        }
+    }
+}
+
+/// Reads from `primary`, moving an item over from `legacy` the first time it's missing there.
+public struct MigratingSecretStore: KeychainStore {
+    public let primary: any KeychainStore
+    public let legacy: any KeychainStore
+
+    public init(primary: any KeychainStore, legacy: any KeychainStore) {
+        self.primary = primary
+        self.legacy = legacy
+    }
+
+    public func read(service: String, account: String) throws -> String? {
+        if let value = try primary.read(service: service, account: account) { return value }
+        guard let value = try? legacy.read(service: service, account: account) else { return nil }
+        try primary.write(value, service: service, account: account)
+        try? legacy.delete(service: service, account: account)
+        return value
+    }
+
+    public func write(_ value: String, service: String, account: String) throws {
+        try primary.write(value, service: service, account: account)
+        try? legacy.delete(service: service, account: account)
+    }
+
+    public func delete(service: String, account: String) throws {
+        try primary.delete(service: service, account: account)
+        try? legacy.delete(service: service, account: account)
+    }
+}
+
 /// Process-local keychain stand-in (tests, previews).
 public final class InMemoryKeychain: KeychainStore, @unchecked Sendable {
     private let lock = NSLock()
@@ -95,9 +176,8 @@ public final class InMemoryKeychain: KeychainStore, @unchecked Sendable {
     }
 }
 
-/// Remembers reads, including misses and failures, so the keychain is asked at most once per item per
-/// process. macOS can prompt for the login password on every read by a rebuilt binary, and SwiftUI
-/// views check for keys on each render.
+/// Remembers reads, including misses and failures, so the store is asked at most once per item per
+/// process. SwiftUI views check for keys on each render.
 public final class CachingKeychain: KeychainStore, @unchecked Sendable {
     private let base: any KeychainStore
     private let lock = NSLock()
@@ -124,10 +204,11 @@ public final class CachingKeychain: KeychainStore, @unchecked Sendable {
     }
 }
 
-/// API keys: the keychain is authoritative, environment variables are a fallback.
+/// API keys: the saved value is authoritative, environment variables are a fallback.
 public struct Secrets: Sendable {
     public static let service = "com.nativegranola.secrets"
-    public static let shared = Secrets(keychain: CachingKeychain(SystemKeychain()))
+    public static let shared = Secrets(
+        keychain: CachingKeychain(MigratingSecretStore(primary: FileSecretStore(), legacy: SystemKeychain())))
 
     public enum Source: String, Sendable { case keychain, environment }
 

@@ -45,7 +45,7 @@ On first use, macOS asks for microphone, system audio recording and calendar acc
 
 Open Settings from the menu bar icon.
 
-- **AI:** paste your xAI key, which the app keeps in the macOS Keychain. The default model is `grok-4.20-0309-non-reasoning`, which writes a meeting's notes in about five seconds. `grok-4.7` gives similar notes in closer to a minute.
+- **AI:** paste your xAI key. The app saves it, and a Notion token, in `~/Library/Application Support/NativeGranola/secrets.json`, readable only by your user account. It doesn't use the Keychain, because macOS asks for your password after every rebuild of a self-signed app. Keys saved by older versions move over on first use. The default model is `grok-4.20-0309-non-reasoning`, which writes a meeting's notes in about five seconds. `grok-4.7` gives similar notes in closer to a minute.
 - **Notion:** create an internal integration at [notion.so/profile/integrations](https://www.notion.so/profile/integrations), add it to a page under ••• → Connections, then paste the token and the page's URL. The app creates a "Meeting Notes" database there and exports each note as a row, with the transcript in a toggle.
 - **Cursor MCP:** click "Add to Cursor".
 
@@ -92,7 +92,7 @@ The code lives in five modules:
 | `GranolaCore` | Models, SQLite store, full-text search, echo filter |
 | `GranolaAudio` | Process tap, microphone capture, live transcription, the recorder |
 | `GranolaDetection` | Calendar, mic activity, the detection rules, the prompt window |
-| `GranolaIntelligence` | xAI client, note templates and generation, Notion export, Keychain |
+| `GranolaIntelligence` | xAI client, note templates and generation, Notion export, saved keys |
 | `GranolaMCP` | The MCP server |
 
 `Sources/NativeGranola` holds the SwiftUI app that ties them together.

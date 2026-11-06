@@ -45,6 +45,32 @@ import Testing
         #expect(try NotionClient(secrets: full).token == "t")
     }
 
+    @Test func fileStoreRoundTripsWithOwnerOnlyPermissions() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("secrets-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("secrets.json")
+        let store = FileSecretStore(url: url)
+        #expect(try store.read(service: "s", account: "a") == nil)
+        try store.write("v1", service: "s", account: "a")
+        try store.write("v2", service: "s", account: "b")
+        #expect(try FileSecretStore(url: url).read(service: "s", account: "a") == "v1")
+        let mode = try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? Int
+        #expect(mode == 0o600)
+        try store.delete(service: "s", account: "a")
+        #expect(try store.read(service: "s", account: "a") == nil)
+        #expect(try store.read(service: "s", account: "b") == "v2")
+    }
+
+    @Test func migratingStoreMovesLegacyItemsOnFirstRead() throws {
+        let primary = InMemoryKeychain()
+        let legacy = InMemoryKeychain(["s/a": "old"])
+        let store = MigratingSecretStore(primary: primary, legacy: legacy)
+        #expect(try store.read(service: "s", account: "a") == "old")
+        #expect(try primary.read(service: "s", account: "a") == "old")
+        #expect(try legacy.read(service: "s", account: "a") == nil)
+        #expect(try store.read(service: "s", account: "missing") == nil)
+    }
+
     @Test func cachingKeychainReadsEachItemOnce() throws {
         final class Counting: KeychainStore, @unchecked Sendable {
             let inner = InMemoryKeychain(["com.nativegranola.secrets/xaiAPIKey": "k"])
