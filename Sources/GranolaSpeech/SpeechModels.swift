@@ -17,8 +17,9 @@ public enum ParakeetModel: String, Sendable, CaseIterable, Codable {
 
     public var isDownloaded: Bool { AsrModels.modelsExist(at: cacheDirectory, version: version) }
 
-    public func download(progress: ProgressHandler? = nil) async throws {
-        try await AsrModels.download(version: version, progressHandler: progress)
+    /// `progress` gets the completed fraction, 0...1.
+    public func download(progress: (@Sendable (Double) -> Void)? = nil) async throws {
+        try await AsrModels.download(version: version, progressHandler: progress.map { p in { p($0.fractionCompleted) } })
     }
 }
 
@@ -33,8 +34,8 @@ public enum DiarizerModel {
         }
     }
 
-    public static func download(progress: ProgressHandler? = nil) async throws {
-        _ = try await OfflineDiarizerModels.load(progressHandler: progress)
+    public static func download(progress: (@Sendable (Double) -> Void)? = nil) async throws {
+        _ = try await OfflineDiarizerModels.load(progressHandler: progress.map { p in { p($0.fractionCompleted) } })
     }
 }
 

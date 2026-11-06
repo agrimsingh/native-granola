@@ -31,6 +31,16 @@ import Testing
         #expect(s.map { $0.text.split(separator: " ").count }.reduce(0, +) == 60)
     }
 
+    @Test func splitsOnSpeakerChange() {
+        let w = Self.words([("No", 0, 0.3), ("blockers.", 0.4, 0.9), ("I'm", 1.2, 1.4), ("still", 1.5, 1.8),
+                            ("chasing", 1.9, 2.3), ("it", 2.4, 2.5)])
+        let turns = [SpeakerTurn(speakerID: "A", start: 0, end: 1.0), SpeakerTurn(speakerID: "B", start: 1.1, end: 2.2)]
+        let s = SegmentBuilder.segments(from: w, meetingID: "m", source: .system) {
+            SpeakerAssignment.speaker(of: $0, turns: turns)
+        }
+        #expect(s.map(\.text) == ["No blockers.", "I'm still chasing it"])
+    }
+
     @Test func emptyInput() {
         #expect(SegmentBuilder.segments(from: [], meetingID: "m", source: .system).isEmpty)
     }

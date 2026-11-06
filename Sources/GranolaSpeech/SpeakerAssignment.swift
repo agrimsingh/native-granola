@@ -52,6 +52,19 @@ public enum SpeakerAssignment {
         return nearest.flatMap { distance(mid, $0) <= 1 ? $0.speakerID : nil }
     }
 
+    /// The diarized speaker of one word: the turn it overlaps most, or the nearest within half a second.
+    public static func speaker(of word: TimedWord, turns: [SpeakerTurn]) -> String? {
+        var best: (id: String, overlap: TimeInterval)?
+        for turn in turns {
+            let o = min(word.end, turn.end) - max(word.start, turn.start)
+            if o > 0, o > best?.overlap ?? 0 { best = (turn.speakerID, o) }
+        }
+        if let best { return best.id }
+        let mid = (word.start + word.end) / 2
+        let nearest = turns.min { distance(mid, $0) < distance(mid, $1) }
+        return nearest.flatMap { distance(mid, $0) <= 0.5 ? $0.speakerID : nil }
+    }
+
     private static func distance(_ t: TimeInterval, _ turn: SpeakerTurn) -> TimeInterval {
         t < turn.start ? turn.start - t : t > turn.end ? t - turn.end : 0
     }

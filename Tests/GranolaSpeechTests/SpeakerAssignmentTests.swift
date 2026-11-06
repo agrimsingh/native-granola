@@ -53,6 +53,14 @@ import Testing
         #expect(labels["c"] == .some(nil))
     }
 
+    @Test func speakerOfWord() {
+        let turns = [SpeakerTurn(speakerID: "A", start: 0, end: 2), SpeakerTurn(speakerID: "B", start: 1.8, end: 4)]
+        #expect(SpeakerAssignment.speaker(of: TimedWord(text: "x", start: 1.75, end: 2.3), turns: turns) == "B")
+        #expect(SpeakerAssignment.speaker(of: TimedWord(text: "x", start: 1.0, end: 1.2), turns: turns) == "A")
+        #expect(SpeakerAssignment.speaker(of: TimedWord(text: "x", start: 4.2, end: 4.3), turns: turns) == "B")
+        #expect(SpeakerAssignment.speaker(of: TimedWord(text: "x", start: 6, end: 6.2), turns: turns) == nil)
+    }
+
     @Test func renameAppliesNamesToLabels() {
         var a = Self.seg("a", .system, 0, 1); a.speaker = "Speaker 1"
         var b = Self.seg("b", .system, 1, 2); b.speaker = "Speaker 2"

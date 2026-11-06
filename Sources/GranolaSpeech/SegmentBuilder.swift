@@ -26,10 +26,13 @@ public enum SegmentBuilder {
         public init() {}
     }
 
+    /// `speaker` (from diarization) also starts a new segment whenever the speaker changes.
     public static func segments(from words: [TimedWord], meetingID: String, source: TranscriptSource,
-                                options: Options = Options()) -> [TranscriptSegment] {
+                                options: Options = Options(),
+                                speaker: ((TimedWord) -> String?)? = nil) -> [TranscriptSegment] {
         var out: [TranscriptSegment] = []
         var current: [TimedWord] = []
+        var currentSpeaker: String?
 
         func flush() {
             guard let first = current.first, let last = current.last else { return }
@@ -37,16 +40,20 @@ public enum SegmentBuilder {
             out.append(TranscriptSegment(meetingID: meetingID, source: source, text: text,
                                          startOffset: first.start, endOffset: max(last.end, first.start)))
             current.removeAll()
+            currentSpeaker = nil
         }
 
         for word in words where !word.text.isEmpty {
+            let who = speaker?(word)
             if let first = current.first, let last = current.last {
                 let gap = word.start - last.end
                 let tooLong = word.end - first.start > options.maxDuration
                 let sentenceEnded = endsSentence(last.text) && last.end - first.start >= options.minSentenceDuration
-                if gap > options.pause || tooLong || sentenceEnded { flush() }
+                let speakerChanged = who != nil && currentSpeaker != nil && who != currentSpeaker
+                if gap > options.pause || tooLong || sentenceEnded || speakerChanged { flush() }
             }
             current.append(word)
+            if let who { currentSpeaker = who }
         }
         flush()
         return out

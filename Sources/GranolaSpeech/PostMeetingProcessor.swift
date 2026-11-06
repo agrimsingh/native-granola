@@ -58,11 +58,10 @@ public struct PostMeetingProcessor: Sendable {
         guard !meeting.isInProgress else { throw PostMeetingError.stillRecording }
         let live = try store.segments(meetingID: meetingID)
         var outcome = Outcome()
-        var segments = live
 
+        var words: [TranscriptSource: [TimedWord]] = [:]
         if let model = options.retranscribeWith {
             let transcriber = ParakeetTranscriber(model: model)
-            var replaced: [TranscriptSource: [TranscriptSegment]] = [:]
             for source in TranscriptSource.allCases {
                 let url = AudioArchive.url(meetingID: meetingID, source: source, root: options.audioRoot)
                 guard FileManager.default.fileExists(atPath: url.path) else { continue }
@@ -70,42 +69,51 @@ public struct PostMeetingProcessor: Sendable {
                 onStage(.transcribing(source))
                 do {
                     let result = try await transcriber.transcribe(url: url)
-                    let new = SegmentBuilder.segments(from: result.words, meetingID: meetingID, source: source)
-                    if new.isEmpty, live.contains(where: { $0.source == source }) {
+                    if result.words.isEmpty, live.contains(where: { $0.source == source }) {
                         outcome.warnings.append("Parakeet heard nothing in the \(source.rawValue) audio; kept the live transcript")
                         continue
                     }
-                    replaced[source] = new
+                    words[source] = result.words
                 } catch {
                     try Task.checkCancellation()
-                    outcome.warnings.append("Re-transcribing \(source.rawValue) audio failed: \(error)")
+                    outcome.warnings.append("Re-transcribing \(source.rawValue) audio failed: \(error.localizedDescription)")
                 }
-            }
-            if !replaced.isEmpty {
-                segments = live.filter { replaced[$0.source] == nil } + replaced.values.joined()
-                segments.sort { $0.startOffset < $1.startOffset }
-                outcome.retranscribed = TranscriptSource.allCases.filter { replaced[$0] != nil }
-                let before = segments.count
-                segments = Self.removingEchoes(segments)
-                outcome.droppedEchoes = before - segments.count
             }
         }
 
-        var labels: [String: String?]?
+        var turns: [SpeakerTurn]?
         let systemAudio = AudioArchive.url(meetingID: meetingID, source: .system, root: options.audioRoot)
-        if options.separateSpeakers, segments.contains(where: { $0.source == .system }),
+        if options.separateSpeakers, words[.system] != nil || live.contains(where: { $0.source == .system }),
            FileManager.default.fileExists(atPath: systemAudio.path) {
             try Task.checkCancellation()
             onStage(.separatingSpeakers)
             do {
-                let turns = try await SpeakerDiarizer.turns(audioURL: systemAudio)
-                let assigned = SpeakerAssignment.labels(for: segments, turns: turns)
-                labels = assigned
-                outcome.speakerCount = Set(assigned.values.compactMap { $0 }).count
+                turns = try await SpeakerDiarizer.turns(audioURL: systemAudio)
             } catch {
                 try Task.checkCancellation()
-                outcome.warnings.append("Speaker separation failed: \(error)")
+                outcome.warnings.append("Speaker separation failed: \(error.localizedDescription)")
             }
+        }
+
+        var segments = live
+        if !words.isEmpty {
+            var rebuilt = live.filter { words[$0.source] == nil }
+            for (source, w) in words {
+                let speaker: ((TimedWord) -> String?)? = source == .system
+                    ? turns.map { t in { SpeakerAssignment.speaker(of: $0, turns: t) } } : nil
+                rebuilt += SegmentBuilder.segments(from: w, meetingID: meetingID, source: source, speaker: speaker)
+            }
+            rebuilt.sort { $0.startOffset < $1.startOffset }
+            segments = Self.removingEchoes(rebuilt)
+            outcome.droppedEchoes = rebuilt.count - segments.count
+            outcome.retranscribed = TranscriptSource.allCases.filter { words[$0] != nil }
+        }
+
+        var labels: [String: String?]?
+        if let turns {
+            let assigned = SpeakerAssignment.labels(for: segments, turns: turns)
+            labels = assigned
+            outcome.speakerCount = Set(assigned.values.compactMap { $0 }).count
         }
 
         try Task.checkCancellation()

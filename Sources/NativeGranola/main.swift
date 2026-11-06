@@ -29,5 +29,10 @@ if let index = arguments.firstIndex(of: "--selftest") {
     SelfTest.run(Array(arguments[(index + 1)...]))
 }
 
+if let index = arguments.firstIndex(of: "--benchmark") {
+    XAIClient.defaultModel = Preferences.model
+    Benchmark.run(Array(arguments[(index + 1)...]))
+}
+
 XAIClient.defaultModel = Preferences.model
 NativeGranolaApp.main()
