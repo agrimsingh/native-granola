@@ -30,10 +30,26 @@ final class AppState {
             fatalError("Could not open the database at \(Store.defaultURL.path): \(error)")
         }
         recorder = MeetingRecorder(store: store)
+        recorder.onWarning = { [weak self] in self?.lastError = $0 }
+        endUnfinishedMeetings()
         refresh()
         selectedMeetingID = meetings.first?.id
         NotificationCenter.default.addObserver(forName: Store.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.scheduleRefresh() }
+        }
+        SystemEvents.shared.start(state: self)
+        let retention = Preferences.audioRetentionDays
+        Task.detached(priority: .background) { AudioArchive.prune(olderThanDays: retention) }
+    }
+
+    /// Meetings left in progress by a crash or a kill end where their transcript does.
+    private func endUnfinishedMeetings() {
+        let unfinished = (try? store.unfinishedMeetings()) ?? []
+        for var meeting in unfinished where meeting.id != recorder.meeting?.id {
+            let segments = (try? store.segments(meetingID: meeting.id)) ?? []
+            meeting.endedAt = RecordingPolicy.recoveredEnd(of: meeting, segments: segments)
+            save(meeting)
+            log.info("Ended meeting \(meeting.id, privacy: .public) left unfinished by the last run")
         }
     }
 
@@ -56,6 +72,8 @@ final class AppState {
         selectedMeetingID = meeting.id
         var options = MeetingRecorder.Options()
         options.echoCancellation = Preferences.echoCancellation
+        if Preferences.systemAudioScope == .app, let sourceApp { options.systemAudioScope = .app(bundleID: sourceApp) }
+        if Preferences.keepAudio { options.audioArchiveRoot = AudioArchive.root }
         let vocabulary = attendees.compactMap(\.name) + Preferences.customVocabulary
         lastError = nil
         await recorder.start(meeting, options: options, vocabulary: vocabulary)
@@ -65,16 +83,23 @@ final class AppState {
         refresh()
     }
 
-    func stopMeeting() async {
-        guard recorder.isRecording, let meeting = await recorder.stop() else { return }
+    func stopMeeting(endedAt: Date? = nil) async {
+        guard recorder.isRecording, let meeting = await recorder.stop(endedAt: endedAt) else { return }
         DetectionCoordinator.shared.recordingChanged(false)
         refresh()
         await afterMeetingEnded(meeting)
     }
 
+    /// Runs once the recorder has stopped and the meeting's audio files are closed.
     func afterMeetingEnded(_ meeting: Meeting) async {
+        if AudioArchive.hasAudio(meetingID: meeting.id) { await meetingAudioReady(meeting) }
         await postProcess(meeting)
     }
+
+    /// The meeting's audio is complete at `AudioArchive.url(meetingID:source:)`: 16 kHz mono Float32,
+    /// sample 0 at `meeting.startedAt`, both files padded to the meeting's end. Post-meeting audio
+    /// processing (re-transcription, speaker separation) hooks in here, before notes are generated.
+    func meetingAudioReady(_ meeting: Meeting) async {}
 
     // MARK: Editing
 
@@ -94,6 +119,7 @@ final class AppState {
     func delete(_ meeting: Meeting) {
         guard recorder.meeting?.id != meeting.id || !recorder.isRecording else { return }
         do { try store.deleteMeeting(id: meeting.id) } catch { report(error) }
+        AudioArchive.delete(meetingID: meeting.id)
         if selectedMeetingID == meeting.id { selectedMeetingID = nil }
     }
 
@@ -146,6 +172,29 @@ enum Preferences {
     static var userName: String {
         get { defaults.string(forKey: "userName") ?? NSFullUserName() }
         set { defaults.set(newValue, forKey: "userName") }
+    }
+
+    enum SystemAudioScope: String, CaseIterable {
+        /// Only the app the meeting was detected in, falling back to everything if that fails.
+        case app
+        case all
+    }
+
+    static var systemAudioScope: SystemAudioScope {
+        get { defaults.string(forKey: "systemAudioScope").flatMap(SystemAudioScope.init) ?? .app }
+        set { defaults.set(newValue.rawValue, forKey: "systemAudioScope") }
+    }
+
+    /// Keep each meeting's audio for post-meeting processing.
+    static var keepAudio: Bool {
+        get { defaults.object(forKey: "keepAudio") as? Bool ?? true }
+        set { defaults.set(newValue, forKey: "keepAudio") }
+    }
+
+    /// Saved audio older than this is deleted on launch; 0 keeps it forever.
+    static var audioRetentionDays: Int {
+        get { defaults.object(forKey: "audioRetentionDays") as? Int ?? 7 }
+        set { defaults.set(newValue, forKey: "audioRetentionDays") }
     }
 
     static var autoStop: Bool {

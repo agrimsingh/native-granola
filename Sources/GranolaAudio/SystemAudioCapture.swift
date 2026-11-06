@@ -47,6 +47,12 @@ public final class SystemAudioCapture: @unchecked Sendable {
 
     deinit { stop() }
 
+    /// Every Core Audio client process, and whether an app scope for `bundleID` would tap it.
+    public static func processes(matching bundleID: String) -> [(process: AudioClientProcess, matched: Bool)] {
+        let pids = AudioSystem.appPIDs(bundleID: bundleID)
+        return AudioSystem.clientProcesses().map { ($0, AppAudioMatcher.matches($0, target: bundleID, appPIDs: pids)) }
+    }
+
     public func start(handler: @escaping Handler) throws {
         lock.lock()
         defer { lock.unlock() }

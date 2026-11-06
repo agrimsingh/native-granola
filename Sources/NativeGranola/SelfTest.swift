@@ -1,3 +1,4 @@
+import AVFAudio
 import Foundation
 import GranolaAudio
 import GranolaCore
@@ -6,6 +7,9 @@ import GranolaIntelligence
 /// Headless test modes, run through the signed bundle so macOS attributes permissions to the app:
 ///   open -W -n build/NativeGranola.app --args --selftest transcribe-file <audio> <out.json>
 ///   open -W -n build/NativeGranola.app --args --selftest record <seconds> <out.json> [--no-mic] [--no-system]
+///       [--no-aec] [--app <bundleID>] [--keep-audio] [--suspend <atSeconds> <forSeconds>]
+///   open -W -n build/NativeGranola.app --args --selftest audio-processes <bundleID> <out.json>
+/// `--keep-audio` writes the archive under `<out.json>.audio/`; `--suspend` pauses and resumes mid-recording.
 enum SelfTest {
     struct Output: Encodable {
         var ok: Bool
@@ -13,6 +17,28 @@ enum SelfTest {
         var warnings: [String] = []
         var segments: [Segment] = []
         var transcript: String = ""
+        var archives: [Archive]?
+        var processes: [Process]?
+    }
+
+    struct Archive: Encodable {
+        var source: String
+        var path: String
+        var seconds: Double
+        var sampleRate: Double
+        var channels: UInt32
+        var float32: Bool
+        /// Whole seconds into the file whose level is clearly above silence.
+        var loudSeconds: [Int]
+    }
+
+    struct Process: Encodable {
+        var pid: Int32
+        var bundleID: String?
+        var parentPID: Int32?
+        var responsiblePID: Int32?
+        var playing: Bool
+        var matched: Bool
     }
 
     struct Segment: Encodable {
@@ -33,9 +59,26 @@ enum SelfTest {
                     output = try await transcribeFile(URL(fileURLWithPath: args[1]))
                 case "record" where args.count >= 3:
                     outPath = args[2]
-                    output = try await record(seconds: Double(args[1]) ?? 10,
-                                              mic: !args.contains("--no-mic"), system: !args.contains("--no-system"),
+                    var options = MeetingRecorder.Options()
+                    options.captureMicrophone = !args.contains("--no-mic")
+                    options.captureSystemAudio = !args.contains("--no-system")
+                    options.echoCancellation = !args.contains("--no-aec")
+                    if let app = value(after: "--app", in: args) { options.systemAudioScope = .app(bundleID: app) }
+                    if args.contains("--keep-audio") { options.audioArchiveRoot = URL(fileURLWithPath: outPath + ".audio") }
+                    var suspend: (at: Double, for: Double)?
+                    if let i = args.firstIndex(of: "--suspend"), i + 2 < args.count,
+                       let at = Double(args[i + 1]), let duration = Double(args[i + 2]) {
+                        suspend = (at, duration)
+                    }
+                    output = try await record(seconds: Double(args[1]) ?? 10, options: options, suspend: suspend,
                                               storeURL: URL(fileURLWithPath: outPath + ".sqlite"))
+                case "audio-processes" where args.count >= 3:
+                    outPath = args[2]
+                    output = Output(ok: true, processes: SystemAudioCapture.processes(matching: args[1]).map {
+                        Process(pid: $0.process.pid, bundleID: $0.process.bundleID, parentPID: $0.process.parentPID,
+                                responsiblePID: $0.process.responsiblePID, playing: $0.process.isRunningOutput,
+                                matched: $0.matched)
+                    })
                 case "enhance" where args.count >= 2:
                     outPath = args[1]
                     output = try await enhanceSample()
@@ -101,24 +144,56 @@ enum SelfTest {
                       transcript: notes)
     }
 
+    static func value(after flag: String, in args: [String]) -> String? {
+        guard let i = args.firstIndex(of: flag), i + 1 < args.count else { return nil }
+        return args[i + 1]
+    }
+
     @MainActor
-    static func record(seconds: Double, mic: Bool, system: Bool, storeURL: URL) async throws -> Output {
+    static func record(seconds: Double, options: MeetingRecorder.Options, suspend: (at: Double, for: Double)?,
+                       storeURL: URL) async throws -> Output {
         try? FileManager.default.removeItem(at: storeURL)
+        if let root = options.audioArchiveRoot { try? FileManager.default.removeItem(at: root) }
         let store = try Store(url: storeURL)
         let recorder = MeetingRecorder(store: store)
-        var options = MeetingRecorder.Options()
-        options.captureMicrophone = mic
-        options.captureSystemAudio = system
         await recorder.start(Meeting(title: "Self test"), options: options)
         if case let .failed(message) = recorder.state {
             return Output(ok: false, error: message, warnings: recorder.warnings)
         }
-        try await Task.sleep(for: .seconds(seconds))
+        if let suspend {
+            try await Task.sleep(for: .seconds(suspend.at))
+            await recorder.suspend()
+            try await Task.sleep(for: .seconds(suspend.for))
+            await recorder.resume()
+            try await Task.sleep(for: .seconds(max(0, seconds - suspend.at - suspend.for)))
+        } else {
+            try await Task.sleep(for: .seconds(seconds))
+        }
         let meeting = await recorder.stop()
         let segments = try store.segments(meetingID: meeting?.id ?? "")
+        let archives = options.audioArchiveRoot.map { root in
+            TranscriptSource.allCases.compactMap { archive(AudioArchive.url(meetingID: meeting?.id ?? "", source: $0, root: root), source: $0) }
+        }
         return Output(
             ok: true, warnings: recorder.warnings,
             segments: segments.map { Segment(source: $0.source.rawValue, text: $0.text, start: $0.startOffset, end: $0.endOffset) },
-            transcript: Transcript.format(segments))
+            transcript: Transcript.format(segments), archives: archives)
+    }
+
+    static func archive(_ url: URL, source: TranscriptSource) -> Archive? {
+        guard let file = try? AVAudioFile(forReading: url, commonFormat: .pcmFormatFloat32, interleaved: false),
+              let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.processingFormat.sampleRate))
+        else { return nil }
+        var loud: [Int] = []
+        var second = 0
+        while file.framePosition < file.length, (try? file.read(into: buffer)) != nil, buffer.frameLength > 0 {
+            let samples = UnsafeBufferPointer(start: buffer.floatChannelData![0], count: Int(buffer.frameLength))
+            let rms = (samples.reduce(0) { $0 + $1 * $1 } / Float(samples.count)).squareRoot()
+            if rms > 0.005 { loud.append(second) }
+            second += 1
+        }
+        return Archive(source: source.rawValue, path: url.path, seconds: Double(file.length) / file.fileFormat.sampleRate,
+                       sampleRate: file.fileFormat.sampleRate, channels: file.fileFormat.channelCount,
+                       float32: file.fileFormat.commonFormat == .pcmFormatFloat32, loudSeconds: loud)
     }
 }
