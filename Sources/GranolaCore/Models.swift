@@ -1,0 +1,123 @@
+import Foundation
+
+public struct Attendee: Codable, Sendable, Hashable {
+    public var name: String?
+    public var email: String?
+
+    public init(name: String? = nil, email: String? = nil) {
+        self.name = name
+        self.email = email
+    }
+
+    public var displayName: String { name ?? email ?? "Unknown" }
+}
+
+public struct Meeting: Codable, Sendable, Hashable, Identifiable {
+    public var id: String
+    public var title: String
+    public var startedAt: Date
+    public var endedAt: Date?
+    public var calendarEventID: String?
+    public var attendees: [Attendee]
+    /// Bundle ID of the app that triggered the meeting (e.g. us.zoom.xos), if known.
+    public var sourceApp: String?
+    /// The user's own notes, typed during the meeting (markdown).
+    public var rawNotes: String
+    /// AI-generated notes (markdown), produced after the meeting ends.
+    public var enhancedNotes: String?
+    public var templateID: String?
+    public var folder: String?
+    public var notionPageURL: String?
+
+    public init(
+        id: String = UUID().uuidString,
+        title: String,
+        startedAt: Date = Date(),
+        endedAt: Date? = nil,
+        calendarEventID: String? = nil,
+        attendees: [Attendee] = [],
+        sourceApp: String? = nil,
+        rawNotes: String = "",
+        enhancedNotes: String? = nil,
+        templateID: String? = nil,
+        folder: String? = nil,
+        notionPageURL: String? = nil
+    ) {
+        self.id = id
+        self.title = title
+        self.startedAt = startedAt
+        self.endedAt = endedAt
+        self.calendarEventID = calendarEventID
+        self.attendees = attendees
+        self.sourceApp = sourceApp
+        self.rawNotes = rawNotes
+        self.enhancedNotes = enhancedNotes
+        self.templateID = templateID
+        self.folder = folder
+        self.notionPageURL = notionPageURL
+    }
+
+    public var isInProgress: Bool { endedAt == nil }
+    public var duration: TimeInterval? { endedAt.map { $0.timeIntervalSince(startedAt) } }
+}
+
+/// Which capture stream a segment came from. This is how "me" vs "them" is decided.
+public enum TranscriptSource: String, Codable, Sendable, Hashable, CaseIterable {
+    case microphone
+    case system
+
+    public var speakerLabel: String { self == .microphone ? "Me" : "Them" }
+}
+
+public struct TranscriptSegment: Codable, Sendable, Hashable, Identifiable {
+    public var id: String
+    public var meetingID: String
+    public var source: TranscriptSource
+    public var text: String
+    /// Seconds since the meeting's `startedAt`.
+    public var startOffset: TimeInterval
+    public var endOffset: TimeInterval
+
+    public init(
+        id: String = UUID().uuidString,
+        meetingID: String,
+        source: TranscriptSource,
+        text: String,
+        startOffset: TimeInterval,
+        endOffset: TimeInterval
+    ) {
+        self.id = id
+        self.meetingID = meetingID
+        self.source = source
+        self.text = text
+        self.startOffset = startOffset
+        self.endOffset = endOffset
+    }
+}
+
+public struct SearchHit: Codable, Sendable, Hashable {
+    public enum Kind: String, Codable, Sendable { case title, notes, enhancedNotes, transcript }
+    public var meetingID: String
+    public var meetingTitle: String
+    public var meetingStartedAt: Date
+    public var kind: Kind
+    public var snippet: String
+    /// Offset into the meeting, for transcript hits.
+    public var startOffset: TimeInterval?
+}
+
+public enum Transcript {
+    /// Plain-text transcript with timestamps and Me/Them labels, merging both sources in time order.
+    public static func format(_ segments: [TranscriptSegment]) -> String {
+        segments
+            .sorted { $0.startOffset < $1.startOffset }
+            .map { "[\(timestamp($0.startOffset))] \($0.source.speakerLabel): \($0.text)" }
+            .joined(separator: "\n")
+    }
+
+    public static func timestamp(_ seconds: TimeInterval) -> String {
+        let total = max(0, Int(seconds))
+        let h = total / 3600, m = (total % 3600) / 60, s = total % 60
+        return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%02d:%02d", m, s)
+    }
+}
