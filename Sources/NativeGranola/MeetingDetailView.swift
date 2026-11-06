@@ -1,39 +1,24 @@
 import GranolaCore
+import GranolaIntelligence
 import SwiftUI
 
 struct MeetingDetailView: View {
     let meetingID: String
     @Environment(AppState.self) private var state
-    @Environment(WindowLayout.self) private var layout: WindowLayout?
     @State private var draft: Meeting?
     @State private var tab: Tab = .notes
-    @State private var showTranscript = false
     @State private var saveTask: Task<Void, Never>?
     @State private var pageWidth: CGFloat = 800
-    @State private var detailWidth: CGFloat = 1000
 
-    enum Tab: String, CaseIterable { case enhanced = "AI notes", notes = "My notes" }
+    enum Tab: String { case enhanced = "AI notes", notes = "My notes", transcript = "Transcript" }
 
     private var isLive: Bool { state.recorder.isRecording && state.recorder.meeting?.id == meetingID }
 
     var body: some View {
-        HStack(spacing: 0) {
-            if let draft {
-                page(draft)
-                    .frame(minWidth: 320, maxWidth: .infinity, maxHeight: .infinity)
-                if showTranscript {
-                    Rectangle().fill(Theme.hairline).frame(width: 1)
-                        .ignoresSafeArea(.container, edges: .top)
-                    TranscriptPanel(meeting: draft, isLive: isLive, onClose: { showTranscript = false })
-                        .frame(width: detailWidth < 720 ? 280 : 320)
-                        .background { Theme.sunken.ignoresSafeArea(.container, edges: .top) }
-                        .transition(.move(edge: .trailing).combined(with: .opacity))
-                }
-            }
+        Group {
+            if let draft { page(draft) }
         }
-        .animation(.easeOut(duration: 0.2), value: showTranscript)
-        .onChange(of: showTranscript, initial: true) { layout?.transcriptOpen = showTranscript }
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { detailWidth = $0 }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.canvas)
         .onAppear(perform: load)
         .onChange(of: state.meetings) { refreshFromStore() }
@@ -49,28 +34,39 @@ struct MeetingDetailView: View {
     private func page(_ meeting: Meeting) -> some View {
         ZStack(alignment: .bottom) {
             if let streaming = state.streamingNotes[meetingID] {
-                document(meeting, markdown: streaming)
+                document(meeting) { MarkdownView(markdown: streaming, bodySize: bodySize) }
             } else if tab == .enhanced, let enhanced = meeting.enhancedNotes {
-                document(meeting, markdown: enhanced)
+                document(meeting) { MarkdownView(markdown: enhanced, bodySize: bodySize) }
+            } else if tab == .transcript {
+                document(meeting, anchor: isLive ? .bottom : .top) {
+                    TranscriptView(meeting: meeting, isLive: isLive, bodySize: bodySize)
+                }
             } else {
                 VStack(alignment: .leading, spacing: 0) {
                     header(meeting).readableColumn(padding: pagePadding)
                     editor(meeting).readableColumn(padding: pagePadding)
                 }
             }
-            VStack(spacing: 0) {
-                LinearGradient(colors: [Theme.canvas.opacity(0), Theme.canvas], startPoint: .top, endPoint: .bottom)
-                    .frame(height: 32)
-                Theme.canvas.frame(height: 46)
+            if isLive || NoteDock.offersGenerate(meeting, state: state) {
+                VStack(spacing: 0) {
+                    LinearGradient(colors: [Theme.canvas.opacity(0), Theme.canvas], startPoint: .top, endPoint: .bottom)
+                        .frame(height: 32)
+                    Theme.canvas.frame(height: 46)
+                }
+                .allowsHitTesting(false)
+                NoteDock(meeting: meeting, isLive: isLive)
+                    .padding(.bottom, 20)
             }
-            .allowsHitTesting(false)
-            NoteDock(meeting: meeting, isLive: isLive, showTranscript: $showTranscript)
-                .padding(.bottom, 20)
         }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { pageWidth = $0 }
     }
 
     private var pagePadding: CGFloat { pageWidth < 480 ? 28 : Theme.pagePadding }
+    private var bodySize: CGFloat { pageWidth >= 1000 ? 15 : 14.5 }
+
+    private func tabs(_ meeting: Meeting) -> [Tab] {
+        meeting.enhancedNotes != nil ? [.enhanced, .notes, .transcript] : [.notes, .transcript]
+    }
 
     private var titleSize: CGFloat {
         switch pageWidth {
@@ -82,15 +78,17 @@ struct MeetingDetailView: View {
         }
     }
 
-    private func document(_ meeting: Meeting, markdown: String) -> some View {
+    private func document(_ meeting: Meeting, anchor: UnitPoint? = nil,
+                          @ViewBuilder content: () -> some View) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 header(meeting)
-                MarkdownView(markdown: markdown, bodySize: pageWidth >= 1000 ? 15 : 14.5)
+                content()
             }
             .readableColumn(padding: pagePadding)
             .padding(.bottom, 110)
         }
+        .defaultScrollAnchor(anchor)
     }
 
     private func header(_ meeting: Meeting) -> some View {
@@ -110,8 +108,8 @@ struct MeetingDetailView: View {
                 .font(.system(size: 12.5, weight: .medium))
                 .foregroundStyle(Theme.accentInk)
                 .padding(.vertical, 5)
-            } else if meeting.enhancedNotes != nil {
-                NoteTabSwitcher(tab: $tab)
+            } else {
+                NoteTabSwitcher(tab: $tab, tabs: tabs(meeting))
             }
         }
         .padding(.top, 30)
@@ -228,7 +226,6 @@ struct MeetingDetailView: View {
     private func load() {
         draft = state.selectedMeeting
         tab = draft?.enhancedNotes != nil ? .enhanced : .notes
-        showTranscript = showTranscript || isLive
     }
 
     /// Pick up changes made elsewhere (AI notes, Notion URL) without clobbering in-progress typing.
@@ -252,11 +249,12 @@ struct MeetingDetailView: View {
 
 struct NoteTabSwitcher: View {
     @Binding var tab: MeetingDetailView.Tab
+    let tabs: [MeetingDetailView.Tab]
     @Namespace private var selection
 
     var body: some View {
         HStack(spacing: 0) {
-            ForEach(MeetingDetailView.Tab.allCases, id: \.self) { option in
+            ForEach(tabs, id: \.self) { option in
                 Button {
                     withAnimation(.easeOut(duration: 0.18)) { tab = option }
                 } label: {
@@ -284,47 +282,40 @@ struct NoteTabSwitcher: View {
     }
 }
 
-/// The floating pill at the bottom of a note: transcript toggle with audio bars, plus the one
-/// action that matters right now (stop while live, generate once the call is over).
+/// The floating pill at the bottom of a note, holding the one action that matters right now:
+/// stop while live, generate once the call is over.
 struct NoteDock: View {
     let meeting: Meeting
     let isLive: Bool
-    @Binding var showTranscript: Bool
     @Environment(AppState.self) private var state
+
+    /// Whether the dock owns the Generate action; the toolbar offers it only when this is false.
+    @MainActor static func offersGenerate(_ meeting: Meeting, state: AppState) -> Bool {
+        meeting.enhancedNotes == nil && !meeting.isInProgress && Intelligence.hasXAIKey
+            && state.streamingNotes[meeting.id] == nil
+    }
 
     var body: some View {
         let recorder = state.recorder
         HStack(spacing: 4) {
-            Button {
-                showTranscript.toggle()
-            } label: {
+            if isLive {
                 HStack(spacing: 8) {
-                    DancingBars(level: isLive ? max(recorder.levels[.microphone] ?? 0, recorder.levels[.system] ?? 0) : nil)
-                    if isLive {
-                        ElapsedTime(since: meeting.startedAt)
-                    } else {
-                        Text(showTranscript ? "Hide transcript" : "Transcript")
-                    }
+                    DancingBars(level: max(recorder.levels[.microphone] ?? 0, recorder.levels[.system] ?? 0))
+                    ElapsedTime(since: meeting.startedAt)
                 }
                 .font(.system(size: 12.5, weight: .medium))
-                .foregroundStyle(showTranscript ? Theme.accentInk : Theme.ink)
+                .foregroundStyle(Theme.ink)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 7)
-                .background(showTranscript ? Theme.match : .clear, in: Capsule())
-                .contentShape(Capsule())
-            }
-            .buttonStyle(.plain)
-            .help(showTranscript ? "Hide transcript" : "Show transcript")
-
-            if isLive {
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Recording")
                 Button {
                     Task { await state.stopMeeting() }
                 } label: {
                     Label("Stop", systemImage: "stop.fill")
                 }
                 .buttonStyle(PillButtonStyle(kind: .danger))
-            } else if meeting.enhancedNotes == nil, !meeting.isInProgress, Intelligence.hasXAIKey,
-                      state.streamingNotes[meeting.id] == nil {
+            } else {
                 Button {
                     Task { await state.generateNotes(meetingID: meeting.id) }
                 } label: {
@@ -332,6 +323,14 @@ struct NoteDock: View {
                 }
                 .buttonStyle(PillButtonStyle(kind: .accent))
                 .disabled(state.enhancing.contains(meeting.id))
+                .contextMenu {
+                    ForEach(NoteTemplate.builtIn) { template in
+                        Button(template.name) {
+                            Task { await state.generateNotes(meetingID: meeting.id, templateID: template.id) }
+                        }
+                    }
+                }
+                .help("Generate AI notes (right-click to pick a template)")
             }
         }
         .padding(4)
@@ -340,84 +339,46 @@ struct NoteDock: View {
     }
 }
 
-struct TranscriptPanel: View {
+/// The transcript as part of the note: speaker and time over each turn, in reading order.
+struct TranscriptView: View {
     let meeting: Meeting
     let isLive: Bool
-    let onClose: () -> Void
+    var bodySize: CGFloat = 14.5
     @Environment(AppState.self) private var state
 
     var body: some View {
         let segments = state.segments(for: meeting)
-        let hasVolatile = isLive && state.recorder.volatileText.values.contains { !$0.isEmpty }
-        VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Text("Transcript")
-                    .font(.system(size: 13, weight: .semibold))
+        let otherSide = meeting.otherSideLabel(userName: Preferences.userName)
+        let pending = isLive ? TranscriptSource.allCases.compactMap { source in
+            state.recorder.volatileText[source].flatMap { $0.isEmpty ? nil : (source: source, text: $0) }
+        } : []
+        if segments.isEmpty && pending.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(isLive ? "Listening…" : "No transcript")
+                    .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(Theme.ink)
-                if isLive { RecordingDot() }
-                Spacer()
-                Button {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(Transcript.format(segments), forType: .string)
-                } label: {
-                    Image(systemName: "doc.on.doc").foregroundStyle(Theme.inkSecondary)
-                }
-                .buttonStyle(.borderless)
-                .help("Copy transcript")
-                Button(action: onClose) {
-                    Image(systemName: "xmark").font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.inkSecondary)
-                }
-                .buttonStyle(.borderless)
-                .help("Hide transcript")
+                Text(isLive ? "What you and the other side say will appear here."
+                            : "Nothing was transcribed for this meeting.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.inkSecondary)
             }
-            .padding(.horizontal, 16)
-            .frame(height: 42)
-            Rectangle().fill(Theme.hairline).frame(height: 1)
-            if segments.isEmpty && !hasVolatile {
-                VStack(spacing: 6) {
-                    Image(systemName: isLive ? "waveform" : "waveform.slash")
-                        .font(.system(size: 20))
-                        .foregroundStyle(Theme.inkTertiary)
-                        .padding(.bottom, 4)
-                    Text(isLive ? "Listening…" : "No transcript")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Theme.ink)
-                    if isLive {
-                        Text("What you and the other side say will appear here.")
-                            .font(.system(size: 12))
-                            .foregroundStyle(Theme.inkSecondary)
-                            .multilineTextAlignment(.center)
-                    }
+        } else {
+            LazyVStack(alignment: .leading, spacing: 20) {
+                ForEach(TranscriptTurn.turns(segments, otherSide: otherSide)) { turn in
+                    TranscriptLine(speaker: turn.speaker, mine: turn.source == .microphone, time: turn.start,
+                                   text: turn.text, bodySize: bodySize)
                 }
-                .padding(24)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 14) {
-                            ForEach(TranscriptTurn.turns(segments)) { turn in
-                                Bubble(text: turn.text, source: turn.source, speaker: turn.speaker, time: turn.start)
-                            }
-                            if isLive {
-                                ForEach(TranscriptSource.allCases, id: \.self) { source in
-                                    if let text = state.recorder.volatileText[source], !text.isEmpty {
-                                        Bubble(text: text, source: source, speaker: source.speakerLabel, time: nil).opacity(0.55)
-                                    }
-                                }
-                            }
-                            Color.clear.frame(height: 1).id("bottom")
-                        }
-                        .padding(16)
-                    }
-                    .onChange(of: segments.count) { withAnimation { proxy.scrollTo("bottom") } }
+                ForEach(pending, id: \.source) { line in
+                    TranscriptLine(speaker: line.source == .microphone ? line.source.speakerLabel : otherSide,
+                                   mine: line.source == .microphone, time: nil, text: line.text, bodySize: bodySize)
+                        .opacity(0.55)
                 }
             }
         }
-        .background(Theme.sunken)
     }
 }
 
-/// Consecutive segments from the same speaker, shown as one bubble.
+/// Consecutive segments from the same speaker, shown as one turn.
 struct TranscriptTurn: Identifiable {
     let id: String
     let source: TranscriptSource
@@ -425,13 +386,14 @@ struct TranscriptTurn: Identifiable {
     let start: TimeInterval
     var text: String
 
-    static func turns(_ segments: [TranscriptSegment]) -> [TranscriptTurn] {
+    static func turns(_ segments: [TranscriptSegment], otherSide: String) -> [TranscriptTurn] {
         var turns: [TranscriptTurn] = []
         for segment in segments.sorted(by: { $0.startOffset < $1.startOffset }) {
-            if let last = turns.last, last.source == segment.source, last.speaker == segment.displaySpeaker {
+            let speaker = segment.displaySpeaker(otherSide: otherSide)
+            if let last = turns.last, last.source == segment.source, last.speaker == speaker {
                 turns[turns.count - 1].text += " " + segment.text
             } else {
-                turns.append(TranscriptTurn(id: segment.id, source: segment.source, speaker: segment.displaySpeaker,
+                turns.append(TranscriptTurn(id: segment.id, source: segment.source, speaker: speaker,
                                             start: segment.startOffset, text: segment.text))
             }
         }
@@ -439,33 +401,33 @@ struct TranscriptTurn: Identifiable {
     }
 }
 
-struct Bubble: View {
-    let text: String
-    let source: TranscriptSource
+struct TranscriptLine: View {
     let speaker: String
+    let mine: Bool
     let time: TimeInterval?
+    let text: String
+    var bodySize: CGFloat = 14.5
 
     var body: some View {
-        let mine = source == .microphone
-        HStack {
-            if mine { Spacer(minLength: 32) }
-            VStack(alignment: mine ? .trailing : .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Text(speaker)
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundStyle(mine ? Theme.accentInk : Theme.ink)
                 if let time {
-                    Text("\(Text(speaker).foregroundStyle(Theme.ink).fontWeight(.semibold))  \(Text(Transcript.timestamp(time)).foregroundStyle(Theme.inkSecondary))")
-                        .font(.system(size: 11.5, weight: .medium))
+                    Text(Transcript.timestamp(time))
+                        .font(.system(size: 12))
                         .monospacedDigit()
-                        .padding(.horizontal, 4)
+                        .foregroundStyle(Theme.inkTertiary)
                 }
-                Text(text)
-                    .font(.system(size: 13))
-                    .lineSpacing(2.5)
-                    .foregroundStyle(Theme.ink)
-                    .textSelection(.enabled)
-                    .padding(.horizontal, 12).padding(.vertical, 8)
-                    .background(mine ? Theme.accentGround : Theme.raised,
-                                in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
-            if !mine { Spacer(minLength: 32) }
+            Text(text)
+                .font(.system(size: bodySize))
+                .lineSpacing(bodySize * 0.32)
+                .foregroundStyle(Theme.ink)
+                .textSelection(.enabled)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
+

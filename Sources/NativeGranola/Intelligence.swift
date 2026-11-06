@@ -102,18 +102,22 @@ struct IntelligenceActions: View {
     var body: some View {
         let meeting = state.selectedMeeting
         let busy = state.enhancing.contains(meetingID)
-        Menu {
-            ForEach(NoteTemplate.builtIn) { template in
-                Button(template.name) { Task { await state.generateNotes(meetingID: meetingID, templateID: template.id) } }
+        let isLive = state.recorder.isRecording && state.recorder.meeting?.id == meetingID
+        if let meeting, !isLive, !NoteDock.offersGenerate(meeting, state: state) {
+            let verb = meeting.enhancedNotes == nil ? "Generate notes" : "Regenerate"
+            Menu {
+                ForEach(NoteTemplate.builtIn) { template in
+                    Button(template.name) { Task { await state.generateNotes(meetingID: meetingID, templateID: template.id) } }
+                }
+            } label: {
+                Label(busy ? "Generating…" : verb, systemImage: "sparkles")
+                    .labelStyle(.titleAndIcon)
+            } primaryAction: {
+                Task { await state.generateNotes(meetingID: meetingID) }
             }
-        } label: {
-            Label(busy ? "Generating…" : "Generate notes", systemImage: "sparkles")
-                .labelStyle(.titleAndIcon)
-        } primaryAction: {
-            Task { await state.generateNotes(meetingID: meetingID) }
+            .disabled(busy)
+            .help("\(verb) AI notes (click) or pick a template (arrow)")
         }
-        .disabled(busy || state.recorder.isRecording && state.recorder.meeting?.id == meetingID)
-        .help("Generate AI notes (click) or pick a template (arrow)")
 
         Menu {
             Button {
@@ -121,6 +125,13 @@ struct IntelligenceActions: View {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(meeting.enhancedNotes ?? meeting.rawNotes, forType: .string)
             } label: { Label("Copy notes", systemImage: "doc.on.doc") }
+            Button {
+                guard let meeting else { return }
+                NSPasteboard.general.clearContents()
+                let otherSide = meeting.otherSideLabel(userName: Preferences.userName)
+                NSPasteboard.general.setString(Transcript.format(state.segments(for: meeting), otherSide: otherSide),
+                                               forType: .string)
+            } label: { Label("Copy transcript", systemImage: "text.quote") }
             Divider()
             Button {
                 Task { await state.exportToNotion(meetingID: meetingID) }

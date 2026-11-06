@@ -2,25 +2,12 @@ import AppKit
 import GranolaCore
 import SwiftUI
 
-/// Window-level layout facts the detail pane reports up to the split view.
-@Observable final class WindowLayout {
-    var transcriptOpen = false
-}
-
 struct MainWindow: View {
     @Environment(AppState.self) private var state
-    @State private var layout = WindowLayout()
-    @State private var columns: NavigationSplitViewVisibility = .all
-    @State private var sidebarAutoHidden = false
-    @State private var sidebarKeptByUser = false
-    @State private var windowWidth: CGFloat = 1200
-
-    /// Below this width, opening the transcript hides the sidebar so the note keeps a readable column.
-    private static let threePaneMinWidth: CGFloat = 1000
 
     var body: some View {
         @Bindable var state = state
-        NavigationSplitView(columnVisibility: $columns) {
+        NavigationSplitView {
             MeetingList()
                 .navigationSplitViewColumnWidth(min: 260, ideal: 280, max: 360)
                 .toolbar {
@@ -52,37 +39,11 @@ struct MainWindow: View {
         .searchable(text: $state.searchText, placement: .sidebar, prompt: "Search notes and transcripts")
         .onChange(of: state.searchText) { state.runSearch() }
         .tint(Theme.accentFill)
-        .environment(layout)
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { windowWidth = $0 }
-        .onChange(of: layout.transcriptOpen) { _, open in
-            if !open { sidebarKeptByUser = false }
-            fitColumns()
-        }
-        .onChange(of: windowWidth) { fitColumns() }
-        .onChange(of: columns) { _, visibility in
-            guard visibility != .detailOnly, sidebarAutoHidden else { return }
-            sidebarAutoHidden = false
-            sidebarKeptByUser = true
-        }
-    }
-
-    /// Hides the sidebar while three panes don't fit, and brings it back only if it was hidden here.
-    /// Showing it again by hand wins until the transcript closes.
-    private func fitColumns() {
-        let cramped = layout.transcriptOpen && windowWidth < Self.threePaneMinWidth
-        if cramped, columns != .detailOnly, !sidebarAutoHidden, !sidebarKeptByUser {
-            sidebarAutoHidden = true
-            withAnimation(.easeOut(duration: 0.2)) { columns = .detailOnly }
-        } else if !cramped, sidebarAutoHidden {
-            sidebarAutoHidden = false
-            withAnimation(.easeOut(duration: 0.2)) { columns = .all }
-        }
     }
 }
 
 private struct EmptyDetail: View {
     @Environment(AppState.self) private var state
-    @Environment(WindowLayout.self) private var layout: WindowLayout?
 
     var body: some View {
         let hasNotes = !state.meetings.isEmpty
@@ -111,7 +72,6 @@ private struct EmptyDetail: View {
         .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.canvas)
-        .onAppear { layout?.transcriptOpen = false }
     }
 }
 
