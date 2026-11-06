@@ -39,10 +39,16 @@ public final class LiveTranscriber: @unchecked Sendable {
     private var analyzer: SpeechAnalyzer?
     private var continuation: AsyncStream<AnalyzerInput>.Continuation?
     private var resultsTask: Task<Void, Never>?
-    private var targetFormat: AVAudioFormat?
-    private var converter: AVAudioConverter?
+    private var converter: BufferConverter?
     /// Offset of this stream's first sample from `sessionStart`.
     private var streamOffset: TimeInterval?
+    /// Session offset where the audio fed so far ends.
+    private var fedEnd: TimeInterval = 0
+
+    /// Gaps longer than this are filled with silence so the analyzer's clock keeps matching the session's.
+    private static let minGap: TimeInterval = 0.25
+    /// Longer gaps are marked with an explicit start time instead of feeding that much silence.
+    private static let maxSilenceFill: TimeInterval = 30
 
     public init(source: TranscriptSource, sessionStart: Date, onUpdate: @escaping UpdateHandler) {
         self.source = source
@@ -103,7 +109,7 @@ public final class LiveTranscriber: @unchecked Sendable {
         lock.withLock {
             self.analyzer = analyzer
             self.continuation = continuation
-            self.targetFormat = format
+            self.converter = BufferConverter(format: format)
             self.resultsTask = task
         }
 
@@ -118,14 +124,36 @@ public final class LiveTranscriber: @unchecked Sendable {
         return streamOffset ?? 0
     }
 
-    /// Feed captured audio. Safe to call from any thread; converts to the model's format.
-    public func append(_ buffer: AVAudioPCMBuffer) {
+    /// Feed captured audio that starts `offset` seconds into the session. Safe to call from any
+    /// thread; converts to the model's format.
+    public func append(_ buffer: AVAudioPCMBuffer, at offset: TimeInterval) {
         lock.lock()
         defer { lock.unlock() }
-        guard let continuation, let targetFormat else { return }
-        if streamOffset == nil { streamOffset = Date().timeIntervalSince(sessionStart) }
-        guard let converted = convert(buffer, to: targetFormat) else { return }
-        continuation.yield(AnalyzerInput(buffer: converted))
+        guard let continuation, let converter, let converted = converter.convert(buffer) else { return }
+        let rate = converter.format.sampleRate
+        if streamOffset == nil {
+            streamOffset = offset
+            fedEnd = offset
+        }
+        let gap = offset - fedEnd
+        var startTime: CMTime?
+        if gap > Self.minGap {
+            if gap <= Self.maxSilenceFill {
+                var remaining = AVAudioFrameCount((gap * rate).rounded())
+                while remaining > 0 {
+                    let frames = min(remaining, AVAudioFrameCount(rate))
+                    if let silence = AVAudioPCMBuffer.silence(format: converter.format, frames: frames) {
+                        continuation.yield(AnalyzerInput(buffer: silence))
+                    }
+                    remaining -= frames
+                }
+            } else {
+                startTime = CMTime(seconds: offset - (streamOffset ?? offset), preferredTimescale: CMTimeScale(rate))
+            }
+            fedEnd = offset
+        }
+        continuation.yield(AnalyzerInput(buffer: converted, bufferStartTime: startTime))
+        fedEnd += Double(converted.frameLength) / rate
     }
 
     /// Flushes pending audio so the last words are finalized, then shuts the analyzer down.
@@ -140,35 +168,6 @@ public final class LiveTranscriber: @unchecked Sendable {
             log.error("Finalize failed: \(String(describing: error))")
         }
         await task?.value
-    }
-
-    private func convert(_ buffer: AVAudioPCMBuffer, to format: AVAudioFormat) -> AVAudioPCMBuffer? {
-        if buffer.format == format { return buffer }
-        if converter == nil || converter?.inputFormat != buffer.format {
-            converter = AVAudioConverter(from: buffer.format, to: format)
-            converter?.downmix = true
-            converter?.primeMethod = .none
-        }
-        guard let converter else { return nil }
-        let ratio = format.sampleRate / buffer.format.sampleRate
-        let capacity = AVAudioFrameCount((Double(buffer.frameLength) * ratio).rounded(.up)) + 32
-        guard let output = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: capacity) else { return nil }
-        var consumed = false
-        var error: NSError?
-        let status = converter.convert(to: output, error: &error) { _, inputStatus in
-            if consumed {
-                inputStatus.pointee = .noDataNow
-                return nil
-            }
-            consumed = true
-            inputStatus.pointee = .haveData
-            return buffer
-        }
-        if status == .error {
-            log.error("Audio conversion failed: \(String(describing: error))")
-            return nil
-        }
-        return output.frameLength > 0 ? output : nil
     }
 }
 

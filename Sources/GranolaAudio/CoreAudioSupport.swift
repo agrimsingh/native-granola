@@ -1,3 +1,4 @@
+import AppKit
 import CoreAudio
 import Foundation
 
@@ -64,4 +65,39 @@ enum AudioSystem {
         guard let object, object != kAudioObjectUnknown else { return nil }
         return object
     }
+
+    /// Every process connected to Core Audio, except `excluded`.
+    static func clientProcesses(excluding excluded: pid_t = getpid()) -> [AudioClientProcess] {
+        let processes = (try? AudioHardwareSystem.shared.processes) ?? []
+        return processes.compactMap { process in
+            guard let pid = try? process.pid, pid != excluded else { return nil }
+            let responsible = responsiblePID(pid)
+            return AudioClientProcess(
+                objectID: process.id, pid: pid, bundleID: (try? process.bundleID) ?? nil,
+                responsiblePID: responsible == pid ? nil : responsible, parentPID: parentPID(pid),
+                isRunningOutput: (try? process.isRunningOutput) ?? false)
+        }
+    }
+
+    /// PIDs of the running instances of an app.
+    static func appPIDs(bundleID: String) -> Set<pid_t> {
+        Set(NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).map(\.processIdentifier))
+    }
+
+    static func parentPID(_ pid: pid_t) -> pid_t? {
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        guard sysctl(&mib, 4, &info, &size, nil, 0) == 0, size > 0 else { return nil }
+        let parent = info.kp_eproc.e_ppid
+        return parent > 1 ? parent : nil
+    }
+
+    static func responsiblePID(_ pid: pid_t) -> pid_t? {
+        let responsible = responsibility_get_pid_responsible_for_pid(pid)
+        return responsible > 0 ? responsible : nil
+    }
 }
+
+@_silgen_name("responsibility_get_pid_responsible_for_pid")
+private func responsibility_get_pid_responsible_for_pid(_ pid: pid_t) -> pid_t
