@@ -78,14 +78,30 @@ public final class MicrophoneCapture: @unchecked Sendable {
                 log.error("Voice processing unavailable, continuing without echo cancellation: \(String(describing: error))")
             }
         }
-        _ = engine.mainMixerNode
+        // Don't touch mainMixerNode: wiring the output path makes the voice-processing unit fail to
+        // initialize (-10875). An input tap alone is enough to run the engine.
         let format = input.outputFormat(forBus: 0)
         log.info("Microphone format: \(format, privacy: .public), voice processing: \(input.isVoiceProcessingEnabled)")
         input.installTap(onBus: 0, bufferSize: 4096, format: format) { buffer, _ in
-            handler(buffer)
+            handler(buffer.firstChannel() ?? buffer)
         }
         engine.prepare()
         try engine.start()
         isVoiceProcessingActive = input.isVoiceProcessingEnabled
+    }
+}
+
+extension AVAudioPCMBuffer {
+    /// Voice processing on macOS delivers the same processed signal on every channel (5 on a MacBook Pro).
+    /// Returns channel 0 as a mono buffer, or nil if the buffer is already mono or not float.
+    func firstChannel() -> AVAudioPCMBuffer? {
+        guard format.channelCount > 1, let source = floatChannelData,
+              let mono = AVAudioFormat(standardFormatWithSampleRate: format.sampleRate, channels: 1),
+              let copy = AVAudioPCMBuffer(pcmFormat: mono, frameCapacity: frameLength),
+              let dest = copy.floatChannelData
+        else { return nil }
+        copy.frameLength = frameLength
+        dest[0].update(from: source[0], count: Int(frameLength))
+        return copy
     }
 }
