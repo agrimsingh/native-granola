@@ -2,6 +2,7 @@
 # Release build, install to ~/Applications, register the MCP server with Cursor, and (re)launch.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+export OUTPUT_DIR=${OUTPUT_DIR:-build}
 scripts/bundle.sh release
 
 DEST="$HOME/Applications/NativeGranola.app"
@@ -9,7 +10,7 @@ osascript -e 'tell application id "com.nativegranola.app" to quit' 2>/dev/null |
 sleep 1
 mkdir -p "$HOME/Applications"
 rm -rf "$DEST"
-cp -R build/NativeGranola.app "$DEST"
+ditto "$OUTPUT_DIR/NativeGranola.app" "$DEST"
 
 python3 - "$DEST/Contents/MacOS/NativeGranola" <<'EOF'
 import json, os, sys

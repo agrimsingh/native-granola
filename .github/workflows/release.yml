@@ -1,0 +1,102 @@
+# On a v* tag: build, sign with Developer ID, notarize, and attach the zip and DMG to a GitHub release.
+# Without the signing secrets it still publishes ad hoc-signed artifacts, named -unsigned.
+# Run it by hand (workflow_dispatch) to build the artifacts without publishing a release.
+#
+# Secrets:
+#   MACOS_CERT_P12 (base64 .p12 of the Developer ID Application cert + key), MACOS_CERT_PASSWORD
+#   Notarization, either APPLE_ID + TEAM_ID + APP_PASSWORD (app-specific password),
+#   or ASC_KEY_P8 (base64 .p8) + ASC_KEY_ID + ASC_ISSUER_ID (App Store Connect API key)
+name: Release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+      ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Import Developer ID certificate
+        if: env.MACOS_CERT_P12 != ''
+        env:
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          KEYCHAIN=$RUNNER_TEMP/signing.keychain-db
+          KEYCHAIN_PASSWORD=$(uuidgen)
+          echo "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign -f pkcs12
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/cert.p12"
+          IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN" | awk -F'"' '/Developer ID Application/ {print $2; exit}')
+          [ -n "$IDENTITY" ] || { echo "No Developer ID Application identity in MACOS_CERT_P12"; exit 1; }
+          echo "DEVELOPER_ID=$IDENTITY" >> "$GITHUB_ENV"
+          echo "SIGN_KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
+
+      - name: Notary credentials (API key)
+        if: env.MACOS_CERT_P12 != '' && env.ASC_KEY_P8 != ''
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          echo "$ASC_KEY_P8" | base64 --decode > "$RUNNER_TEMP/AuthKey.p8"
+          echo "NOTARY_KEY=$RUNNER_TEMP/AuthKey.p8" >> "$GITHUB_ENV"
+          echo "NOTARY_KEY_ID=$ASC_KEY_ID" >> "$GITHUB_ENV"
+          echo "NOTARY_ISSUER=$ASC_ISSUER_ID" >> "$GITHUB_ENV"
+
+      - name: Build, sign, notarize
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          TEAM_ID: ${{ secrets.TEAM_ID }}
+          APP_PASSWORD: ${{ secrets.APP_PASSWORD }}
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          [ "$GITHUB_REF_TYPE" = tag ] || VERSION=$(plutil -extract CFBundleShortVersionString raw Bundle/Info.plist)
+          scripts/release.sh "$VERSION"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NativeGranola-release
+          path: |
+            dist/*.zip
+            dist/*.dmg
+            dist/SHA256SUMS
+
+      - name: Publish GitHub release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+        run: |
+          TAG=$GITHUB_REF_NAME
+          if [ -n "$DEVELOPER_ID" ] && [ -n "$NOTARY_KEY$APPLE_ID" ]; then
+            NOTES="Signed with Developer ID and notarized by Apple."
+            PRERELEASE=
+          elif [ -n "$DEVELOPER_ID" ]; then
+            NOTES="Signed with Developer ID but not notarized; Gatekeeper may still warn on first launch."
+            PRERELEASE=--prerelease
+          else
+            NOTES="Unsigned build (ad hoc signature). macOS will block the first launch: open System Settings > Privacy & Security and click Open Anyway, or run \`xattr -dr com.apple.quarantine /Applications/NativeGranola.app\`."
+            PRERELEASE=--prerelease
+          fi
+          gh release view "$TAG" > /dev/null 2>&1 || gh release create "$TAG" --title "Native Granola $TAG" --notes "$NOTES" $PRERELEASE
+          gh release upload "$TAG" dist/*.zip dist/*.dmg dist/SHA256SUMS --clobber
+
+      - name: Clean up keychain
+        if: always() && env.SIGN_KEYCHAIN != ''
+        run: security delete-keychain "$SIGN_KEYCHAIN"
