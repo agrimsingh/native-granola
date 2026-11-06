@@ -33,12 +33,33 @@ struct SpeechSettings: View {
     @AppStorage("speechModel") private var model = ParakeetModel.v3
     @AppStorage("speechSeparateSpeakers") private var separateSpeakers = true
     @AppStorage("speechNameSpeakers") private var nameSpeakers = true
+    @AppStorage("systemAudioScope") private var scope = Preferences.SystemAudioScope.app
+    @AppStorage("keepAudio") private var keepAudio = true
+    @AppStorage("audioRetentionDays") private var retentionDays = 7
     @State private var sizes: [String: Int64] = [:]
     @State private var refresh = 0
     private var pipeline: SpeechPipeline { .shared }
 
     var body: some View {
         Form {
+            Section {
+                Toggle("Record only the meeting app", isOn: Binding(
+                    get: { scope == .app }, set: { scope = $0 ? .app : .all }))
+                Toggle("Keep meeting audio", isOn: $keepAudio)
+                Picker("Delete audio after", selection: $retentionDays) {
+                    Text("1 day").tag(1)
+                    Text("7 days").tag(7)
+                    Text("30 days").tag(30)
+                    Text("Never").tag(0)
+                }
+                .disabled(!keepAudio)
+            } header: {
+                Text("Recording")
+            } footer: {
+                Text("When a meeting starts from a detected app, only that app's audio is recorded, so music or a video elsewhere stays out. Meetings started by hand record all system audio. Saved audio is what the steps below work from; without it, the live transcript is kept as is.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
             Section {
                 Toggle("Re-transcribe after the meeting with Parakeet", isOn: $retranscribe)
                 Picker("Model", selection: $model) {

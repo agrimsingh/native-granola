@@ -62,8 +62,9 @@ public struct MeetingChat: Sendable {
             - Answer using only information in the provided meetings. If the answer isn't there, say so plainly \
             rather than guessing.
             - Cite the source of each claim inline as (Meeting Title, Mon D, YYYY), e.g. (Weekly Sync, Mar 4, 2026).
-            - In transcripts, "Me" is \(me); "Them" is the other participant(s), captured together from computer \
-            audio, so individual speakers can't be distinguished. Transcripts contain speech-recognition errors.
+            - In transcripts, "Me" is \(me). Other participants are labelled by name when identified, \
+            "Speaker 1", "Speaker 2"… when voices were separated but not named, or "Them" when they weren't \
+            separated. Transcripts contain speech-recognition errors.
             - Be concise and direct. Use Markdown: short paragraphs or bullets; action items as "- [ ] Owner: task".
             - When asked to draft something (email, summary, follow-up), write it ready to send, without preamble.
             - Today is \(MeetingContext.longDate(now, timeZone: timeZone)). Interpret relative dates ("last \

@@ -97,9 +97,11 @@ final class AppState {
     }
 
     /// The meeting's audio is complete at `AudioArchive.url(meetingID:source:)`: 16 kHz mono Float32,
-    /// sample 0 at `meeting.startedAt`, both files padded to the meeting's end. Post-meeting audio
-    /// processing (re-transcription, speaker separation) hooks in here, before notes are generated.
-    func meetingAudioReady(_ meeting: Meeting) async {}
+    /// sample 0 at `meeting.startedAt`, both files padded to the meeting's end. Runs before notes are
+    /// generated so they see the re-transcribed, speaker-labelled transcript.
+    func meetingAudioReady(_ meeting: Meeting) async {
+        await SpeechPipeline.process(meetingID: meeting.id)
+    }
 
     // MARK: Editing
 

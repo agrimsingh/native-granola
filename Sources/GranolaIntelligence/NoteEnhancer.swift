@@ -77,8 +77,10 @@ public struct NoteEnhancer: Sendable {
             - <my_notes>: the rough notes \(me) typed during the meeting. They are the strongest signal of what \
             mattered to the user.
             - <transcript>: automatic speech recognition, one line per utterance as "[mm:ss] Speaker: text". \
-            "Me" is \(me). "Them" is everyone else on the call, captured from the computer's audio: it may be one \
-            person or several, and individual speakers cannot be told apart. Use the attendee list and the \
+            "Me" is \(me). Everyone else was captured from the computer's audio. Their lines are labelled with \
+            a person's name when it was identified, "Speaker 1", "Speaker 2" and so on when voices were told \
+            apart but not named, or "Them" when they weren't separated (one person or several). A numbered \
+            label is one voice but may occasionally merge two similar voices. Use the attendee list and the \
             conversation itself to attribute statements to specific people only when it is clear. The transcript \
             contains recognition errors; infer the intended words from context (especially names and jargon, \
             preferring spellings from the attendee list and notes), but never invent content.
@@ -104,7 +106,7 @@ public struct NoteEnhancer: Sendable {
             questions as decisions.
             - Write each action item as "- [ ] Owner: task" (add the due date if one was mentioned). Use attendee \
             names when the owner can be inferred, "\(owner)" for things the user committed to, and "Them" only when \
-            the other side committed but the person can't be determined.
+            the other side committed but the person can't be determined. Never use "Speaker N" as an owner.
             - Be faithful: include only what was actually said or written. Do not speculate, add advice, or pad. \
             If the transcript is empty or very short, rely on <my_notes> and keep the notes short.
             - Write in the same language as the meeting.

@@ -8,8 +8,7 @@ if arguments.contains("--mcp") {
     MCPEntry.main()
 }
 
-// --set-secret <xaiAPIKey|notionToken>, value on stdin. Run from the signed bundle so the keychain
-// item belongs to the app and reading it later doesn't prompt.
+// --set-secret <xaiAPIKey|notionToken>, value on stdin.
 if let index = arguments.firstIndex(of: "--set-secret"), index + 1 < arguments.count {
     guard let key = SecretKey(rawValue: arguments[index + 1]), let value = readLine(), !value.isEmpty else {
         FileHandle.standardError.write(Data("usage: --set-secret <xaiAPIKey|notionToken> < value\n".utf8))
@@ -17,7 +16,7 @@ if let index = arguments.firstIndex(of: "--set-secret"), index + 1 < arguments.c
     }
     do {
         try Secrets.shared.set(value, for: key)
-        print("Saved \(key.rawValue) to the keychain")
+        print("Saved \(key.rawValue)")
         exit(0)
     } catch {
         FileHandle.standardError.write(Data("\(error)\n".utf8))

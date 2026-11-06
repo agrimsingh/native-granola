@@ -11,6 +11,7 @@ Your Mac already hears both sides of a call: your voice comes in through the mic
 - **System audio** comes from a Core Audio process tap (macOS 14.2+), the same API Granola uses. There's no virtual audio driver to install. When the meeting started from a detected app, the tap records only that app and its helper processes, so a video in another app stays out of the transcript.
 - **Microphone audio** runs through Apple's voice processing, which cancels echo when you take calls on speakers. A text-level filter drops anything the canceller misses.
 - **Transcription** uses Apple's on-device `SpeechAnalyzer` (macOS 26). It is free, private and streams words as they're spoken. The audio is also saved for 7 days under `~/Library/Application Support/NativeGranola/Audio` for processing after the call. You can turn that off or change how long it's kept.
+- **After the call**, the saved audio is transcribed again with NVIDIA's Parakeet model, which made 28% fewer errors than Apple's model in [our benchmark](docs/asr-benchmark.md), and about five times fewer on noisy meeting audio. The far side's voices are then separated into Speaker 1, Speaker 2 and so on, and Grok matches them to attendee names when the conversation makes it clear. Both run on-device through [FluidAudio](https://github.com/FluidInference/FluidAudio). The models, about 0.5 GB, download the first time they're needed.
 - **Notes** come from Grok, through the xAI API, once the call ends. It works from the transcript, your typed notes and the calendar event. Templates shape the output for 1:1s, sales calls, standups, interviews and more.
 - **Meeting detection** watches your calendar and shows a prompt a minute before events with two or more attendees. It also notices when Zoom, Teams, Slack, FaceTime or a browser starts using the microphone, and offers to take notes. When that app releases the mic, the app stops recording and writes the notes.
 - **Storage** is a local SQLite database with full-text search, at `~/Library/Application Support/NativeGranola/granola.sqlite`.
@@ -85,7 +86,7 @@ open -W -n build/NativeGranola.app --args --selftest enhance out.json
 
 `scripts/release.sh 0.2.0` builds the zip, DMG and checksums into `dist/`. Pushing a `v*` tag runs the same thing on GitHub. With a Developer ID certificate and notarization credentials in the repo secrets (see `.github/workflows/release.yml`), the build is signed and notarized; without them, it's published as an unsigned prerelease.
 
-The code lives in five modules:
+The code lives in six modules:
 
 | Module | Contents |
 | --- | --- |
@@ -93,6 +94,7 @@ The code lives in five modules:
 | `GranolaAudio` | Process tap, microphone capture, live transcription, the recorder |
 | `GranolaDetection` | Calendar, mic activity, the detection rules, the prompt window |
 | `GranolaIntelligence` | xAI client, note templates and generation, Notion export, saved keys |
+| `GranolaSpeech` | Post-meeting re-transcription with Parakeet, speaker separation, the ASR benchmark |
 | `GranolaMCP` | The MCP server |
 
 `Sources/NativeGranola` holds the SwiftUI app that ties them together.
@@ -100,6 +102,6 @@ The code lives in five modules:
 ## Limitations
 
 - Meetings started by hand, and meetings in a browser tab, record all of the browser's or the Mac's audio. Music or a video playing in the same place lands in the transcript.
-- Everyone on the far side of a call is "Them"; the app doesn't tell remote speakers apart.
+- Speaker labels only appear after the call; during it, everyone on the far side is "Them". Similar voices are sometimes merged into one speaker.
 - Transcription languages are whatever Apple's on-device model supports for your locale.
-- Echo cancellation, the call-detection prompts and Notion export pass their tests but have had little real-world use.
+- Echo cancellation, the call-detection prompts and Notion export pass their tests but have had little real-world use. Speaker separation has only been tested on synthetic voices.
