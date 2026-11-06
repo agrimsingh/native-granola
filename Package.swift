@@ -7,6 +7,9 @@ let package = Package(
     products: [
         .executable(name: "NativeGranola", targets: ["NativeGranola"]),
     ],
+    dependencies: [
+        .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.18.2"),
+    ],
     targets: [
         .target(
             name: "GranolaCore",
@@ -16,17 +19,23 @@ let package = Package(
         .target(name: "GranolaMCP", dependencies: ["GranolaCore"]),
         .target(name: "GranolaIntelligence", dependencies: ["GranolaCore"]),
         .target(name: "GranolaDetection", dependencies: ["GranolaCore"]),
+        .target(
+            name: "GranolaSpeech",
+            dependencies: ["GranolaCore", .product(name: "FluidAudio", package: "FluidAudio")]
+        ),
         .executableTarget(
             name: "NativeGranola",
             dependencies: [
                 "GranolaCore", "GranolaAudio", "GranolaMCP",
-                "GranolaIntelligence", "GranolaDetection",
+                "GranolaIntelligence", "GranolaDetection", "GranolaSpeech",
             ]
         ),
         .testTarget(name: "GranolaCoreTests", dependencies: ["GranolaCore"]),
         .testTarget(name: "GranolaMCPTests", dependencies: ["GranolaMCP"]),
         .testTarget(name: "GranolaIntelligenceTests", dependencies: ["GranolaIntelligence"]),
         .testTarget(name: "GranolaDetectionTests", dependencies: ["GranolaDetection"]),
+        .testTarget(name: "GranolaSpeechTests", dependencies: ["GranolaSpeech"]),
+        .testTarget(name: "GranolaAudioTests", dependencies: ["GranolaAudio"]),
     ],
     swiftLanguageModes: [.v5]
 )

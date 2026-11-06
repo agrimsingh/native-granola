@@ -5,7 +5,9 @@ struct SettingsView: View {
     var body: some View {
         TabView {
             GeneralSettings().tabItem { Label("General", systemImage: "gearshape") }
+            SpeechSettings().tabItem { Label("Transcription", systemImage: "waveform") }
             AISettings().tabItem { Label("AI", systemImage: "sparkles") }
+            TemplateSettings().tabItem { Label("Templates", systemImage: "list.bullet.rectangle") }
             NotionSettings().tabItem { Label("Notion", systemImage: "doc.richtext") }
             IntegrationSettings().tabItem { Label("Cursor MCP", systemImage: "point.3.connected.trianglepath.dotted") }
         }

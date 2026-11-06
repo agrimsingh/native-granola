@@ -92,6 +92,13 @@ public final class Store: @unchecked Sendable {
                 segment_id UNINDEXED, meeting_id UNINDEXED, text, tokenize = 'porter unicode61'
             );
             """)
+        if try !columns(of: "segments").contains("speaker") {
+            try exec("ALTER TABLE segments ADD COLUMN speaker TEXT")
+        }
+    }
+
+    private func columns(of table: String) throws -> Set<String> {
+        Set(try query("PRAGMA table_info(\(table))") { $0.string(1) ?? "" })
     }
 
     // MARK: Meetings
@@ -136,6 +143,14 @@ public final class Store: @unchecked Sendable {
         }
     }
 
+    /// Meetings that were never ended, e.g. because the app crashed or was killed mid-recording.
+    public func unfinishedMeetings() throws -> [Meeting] {
+        try locked {
+            try query("SELECT \(Self.meetingColumns) FROM meetings WHERE ended_at IS NULL ORDER BY started_at DESC",
+                      map: Self.meeting)
+        }
+    }
+
     public func deleteMeeting(id: String) throws {
         try locked {
             try run("DELETE FROM segments_fts WHERE meeting_id = ?", id)
@@ -150,16 +165,52 @@ public final class Store: @unchecked Sendable {
 
     /// Insert or replace a finalized transcript segment.
     public func upsertSegment(_ s: TranscriptSegment) throws {
-        try locked {
-            try run("""
-                INSERT INTO segments (id, meeting_id, source, text, start_offset, end_offset) VALUES (?,?,?,?,?,?)
-                ON CONFLICT(id) DO UPDATE SET text=excluded.text, start_offset=excluded.start_offset,
-                    end_offset=excluded.end_offset
-                """, s.id, s.meetingID, s.source.rawValue, s.text, s.startOffset, s.endOffset)
-            try run("DELETE FROM segments_fts WHERE segment_id = ?", s.id)
-            try run("INSERT INTO segments_fts (segment_id, meeting_id, text) VALUES (?,?,?)", s.id, s.meetingID, s.text)
-        }
+        try locked { try writeSegment(s) }
         notify(s.meetingID)
+    }
+
+    /// Swap a meeting's whole transcript in one transaction, e.g. after re-transcribing the saved audio.
+    public func replaceSegments(meetingID: String, with segments: [TranscriptSegment]) throws {
+        try locked {
+            try exec("BEGIN IMMEDIATE")
+            do {
+                try run("DELETE FROM segments_fts WHERE meeting_id = ?", meetingID)
+                try run("DELETE FROM segments WHERE meeting_id = ?", meetingID)
+                for s in segments { try writeSegment(s) }
+                try exec("COMMIT")
+            } catch {
+                try? exec("ROLLBACK")
+                throw error
+            }
+        }
+        notify(meetingID)
+    }
+
+    /// Set speaker labels by segment id. Pass nil to clear a label.
+    public func setSpeakers(_ speakers: [String: String?], meetingID: String) throws {
+        try locked {
+            try exec("BEGIN IMMEDIATE")
+            do {
+                for (id, speaker) in speakers {
+                    try run("UPDATE segments SET speaker = ? WHERE id = ? AND meeting_id = ?", speaker, id, meetingID)
+                }
+                try exec("COMMIT")
+            } catch {
+                try? exec("ROLLBACK")
+                throw error
+            }
+        }
+        notify(meetingID)
+    }
+
+    private func writeSegment(_ s: TranscriptSegment) throws {
+        try run("""
+            INSERT INTO segments (id, meeting_id, source, text, start_offset, end_offset, speaker) VALUES (?,?,?,?,?,?,?)
+            ON CONFLICT(id) DO UPDATE SET text=excluded.text, start_offset=excluded.start_offset,
+                end_offset=excluded.end_offset, speaker=excluded.speaker
+            """, s.id, s.meetingID, s.source.rawValue, s.text, s.startOffset, s.endOffset, s.speaker)
+        try run("DELETE FROM segments_fts WHERE segment_id = ?", s.id)
+        try run("INSERT INTO segments_fts (segment_id, meeting_id, text) VALUES (?,?,?)", s.id, s.meetingID, s.text)
     }
 
     public func deleteSegment(id: String, meetingID: String) throws {
@@ -172,14 +223,17 @@ public final class Store: @unchecked Sendable {
 
     public func segments(meetingID: String) throws -> [TranscriptSegment] {
         try locked {
-            try query("""
-                SELECT id, meeting_id, source, text, start_offset, end_offset FROM segments
+            // A read-only store (the MCP server) may open a database the app hasn't migrated yet.
+            let speaker = try columns(of: "segments").contains("speaker") ? "speaker" : "NULL"
+            return try query("""
+                SELECT id, meeting_id, source, text, start_offset, end_offset, \(speaker) FROM segments
                 WHERE meeting_id = ? ORDER BY start_offset
                 """, meetingID) { row in
                 TranscriptSegment(
                     id: row.string(0)!, meetingID: row.string(1)!,
                     source: TranscriptSource(rawValue: row.string(2)!) ?? .system,
-                    text: row.string(3)!, startOffset: row.double(4), endOffset: row.double(5))
+                    text: row.string(3)!, startOffset: row.double(4), endOffset: row.double(5),
+                    speaker: row.string(6))
             }
         }
     }

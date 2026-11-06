@@ -1,4 +1,5 @@
 import Foundation
+import SQLite3
 import Testing
 @testable import GranolaCore
 
@@ -68,5 +69,61 @@ import Testing
         #expect(try store.meeting(id: m.id) == nil)
         #expect(try store.segments(meetingID: m.id).isEmpty)
         #expect(try store.search("bye").isEmpty)
+    }
+
+    @Test func speakersRoundTripAndShowInTranscript() throws {
+        let store = try Store.inMemory()
+        let m = Meeting(title: "Panel")
+        try store.upsertMeeting(m)
+        let a = TranscriptSegment(meetingID: m.id, source: .system, text: "first", startOffset: 0, endOffset: 1)
+        let b = TranscriptSegment(meetingID: m.id, source: .system, text: "second", startOffset: 2, endOffset: 3)
+        try store.upsertSegment(a)
+        try store.upsertSegment(b)
+        try store.setSpeakers([a.id: "Speaker 1", b.id: "Priya"], meetingID: m.id)
+        #expect(try store.segments(meetingID: m.id).map(\.displaySpeaker) == ["Speaker 1", "Priya"])
+        #expect(try store.transcriptText(meetingID: m.id).contains("Priya: second"))
+        try store.setSpeakers([b.id: nil], meetingID: m.id)
+        #expect(try store.segments(meetingID: m.id).last?.displaySpeaker == "Them")
+    }
+
+    @Test func replaceSegmentsSwapsTranscriptAndIndex() throws {
+        let store = try Store.inMemory()
+        let m = Meeting(title: "Redo")
+        try store.upsertMeeting(m)
+        try store.upsertSegment(TranscriptSegment(meetingID: m.id, source: .system, text: "garbled wurds", startOffset: 0, endOffset: 1))
+        try store.replaceSegments(meetingID: m.id, with: [
+            TranscriptSegment(meetingID: m.id, source: .system, text: "clean words", startOffset: 0, endOffset: 1, speaker: "Speaker 2"),
+        ])
+        #expect(try store.segments(meetingID: m.id).map(\.text) == ["clean words"])
+        #expect(try store.search("wurds").isEmpty)
+        #expect(try store.search("clean").count == 1)
+    }
+
+    @Test func unfinishedMeetingsAreThoseWithoutAnEnd() throws {
+        let store = try Store.inMemory()
+        var done = Meeting(title: "Done")
+        done.endedAt = Date()
+        let open = Meeting(title: "Open")
+        try store.upsertMeeting(done)
+        try store.upsertMeeting(open)
+        #expect(try store.unfinishedMeetings().map(\.id) == [open.id])
+    }
+
+    @Test func migratesOldDatabaseWithoutSpeakerColumn() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("old-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: url) }
+        var db: OpaquePointer?
+        sqlite3_open(url.path, &db)
+        sqlite3_exec(db, """
+            CREATE TABLE segments (id TEXT PRIMARY KEY, meeting_id TEXT NOT NULL, source TEXT NOT NULL,
+                text TEXT NOT NULL, start_offset REAL NOT NULL, end_offset REAL NOT NULL);
+            """, nil, nil, nil)
+        sqlite3_close(db)
+
+        let store = try Store(url: url)
+        let m = Meeting(title: "Old")
+        try store.upsertMeeting(m)
+        try store.upsertSegment(TranscriptSegment(meetingID: m.id, source: .microphone, text: "hi", startOffset: 0, endOffset: 1, speaker: "Me"))
+        #expect(try store.segments(meetingID: m.id).first?.speaker == "Me")
     }
 }

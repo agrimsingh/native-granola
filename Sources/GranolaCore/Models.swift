@@ -77,6 +77,8 @@ public struct TranscriptSegment: Codable, Sendable, Hashable, Identifiable {
     /// Seconds since the meeting's `startedAt`.
     public var startOffset: TimeInterval
     public var endOffset: TimeInterval
+    /// Who spoke, when known beyond the Me/Them split: "Speaker 1", or a name like "Priya Shah".
+    public var speaker: String?
 
     public init(
         id: String = UUID().uuidString,
@@ -84,7 +86,8 @@ public struct TranscriptSegment: Codable, Sendable, Hashable, Identifiable {
         source: TranscriptSource,
         text: String,
         startOffset: TimeInterval,
-        endOffset: TimeInterval
+        endOffset: TimeInterval,
+        speaker: String? = nil
     ) {
         self.id = id
         self.meetingID = meetingID
@@ -92,7 +95,11 @@ public struct TranscriptSegment: Codable, Sendable, Hashable, Identifiable {
         self.text = text
         self.startOffset = startOffset
         self.endOffset = endOffset
+        self.speaker = speaker
     }
+
+    /// The label to show: the identified speaker if there is one, otherwise Me or Them.
+    public var displaySpeaker: String { speaker ?? source.speakerLabel }
 }
 
 public struct SearchHit: Codable, Sendable, Hashable {
@@ -111,7 +118,7 @@ public enum Transcript {
     public static func format(_ segments: [TranscriptSegment]) -> String {
         segments
             .sorted { $0.startOffset < $1.startOffset }
-            .map { "[\(timestamp($0.startOffset))] \($0.source.speakerLabel): \($0.text)" }
+            .map { "[\(timestamp($0.startOffset))] \($0.displaySpeaker): \($0.text)" }
             .joined(separator: "\n")
     }
 

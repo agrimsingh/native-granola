@@ -114,21 +114,25 @@ struct IntelligenceActions: View {
         .disabled(busy || state.recorder.isRecording && state.recorder.meeting?.id == meetingID)
         .help("Generate AI notes (click) or pick a template (arrow)")
 
-        if let url = meeting?.notionPageURL.flatMap(URL.init(string:)) {
-            Button { NSWorkspace.shared.open(url) } label: { Label("Open in Notion", systemImage: "arrow.up.forward.square") }
-        }
-        Button {
-            Task { await state.exportToNotion(meetingID: meetingID) }
+        Menu {
+            Button {
+                guard let meeting else { return }
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(meeting.enhancedNotes ?? meeting.rawNotes, forType: .string)
+            } label: { Label("Copy notes", systemImage: "doc.on.doc") }
+            Divider()
+            Button {
+                Task { await state.exportToNotion(meetingID: meetingID) }
+            } label: {
+                Label(state.exporting.contains(meetingID) ? "Exporting…" : "Export to Notion", systemImage: "square.and.arrow.up")
+            }
+            .disabled(state.exporting.contains(meetingID) || Secrets.shared.get(.notionToken) == nil)
+            if let url = meeting?.notionPageURL.flatMap(URL.init(string:)) {
+                Button { NSWorkspace.shared.open(url) } label: { Label("Open in Notion", systemImage: "arrow.up.forward.square") }
+            }
         } label: {
-            Label(state.exporting.contains(meetingID) ? "Exporting…" : "Export to Notion", systemImage: "square.and.arrow.up")
+            Label("Share", systemImage: state.exporting.contains(meetingID) ? "arrow.trianglehead.2.clockwise" : "square.and.arrow.up")
         }
-        .disabled(state.exporting.contains(meetingID) || Secrets.shared.get(.notionToken) == nil)
-        .help(Secrets.shared.get(.notionToken) == nil ? "Connect Notion in Settings" : "Export to Notion")
-
-        Button {
-            guard let meeting else { return }
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(meeting.enhancedNotes ?? meeting.rawNotes, forType: .string)
-        } label: { Label("Copy notes", systemImage: "doc.on.doc") }
+        .help(Secrets.shared.get(.notionToken) == nil ? "Copy notes (connect Notion in Settings to export)" : "Copy or export to Notion")
     }
 }
