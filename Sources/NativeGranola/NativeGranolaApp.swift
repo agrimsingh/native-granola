@@ -17,7 +17,7 @@ struct NativeGranolaApp: App {
         Window("Native Granola", id: "main") {
             MainWindow()
                 .environment(state)
-                .frame(minWidth: 820, minHeight: 520)
+                .frame(minWidth: 920, minHeight: 560)
         }
         .defaultSize(width: 1100, height: 720)
 

@@ -8,33 +8,66 @@ struct MainWindow: View {
         @Bindable var state = state
         NavigationSplitView {
             MeetingList()
-                .navigationSplitViewColumnWidth(min: 240, ideal: 280)
+                .navigationSplitViewColumnWidth(min: 240, ideal: 270)
+                .toolbar {
+                    ToolbarItem(placement: .primaryAction) {
+                        if state.recorder.isRecording {
+                            Button { Task { await state.stopMeeting() } } label: {
+                                Label("Stop", systemImage: "stop.circle.fill")
+                            }
+                            .tint(Theme.danger)
+                        } else {
+                            Button { Task { await state.startMeeting() } } label: {
+                                Label("New note", systemImage: "square.and.pencil")
+                            }
+                            .disabled(state.recorder.state == .preparing)
+                            .help("New note")
+                        }
+                    }
+                }
         } detail: {
             if let meeting = state.selectedMeeting {
                 MeetingDetailView(meetingID: meeting.id)
                     .id(meeting.id)
             } else {
-                ContentUnavailableView("No note selected", systemImage: "note.text",
-                                       description: Text("Start a new note from the menu bar, or pick one from the list."))
+                EmptyDetail()
             }
         }
+        .toolbar(removing: .title)
+        .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
         .searchable(text: $state.searchText, placement: .sidebar, prompt: "Search notes and transcripts")
         .onChange(of: state.searchText) { state.runSearch() }
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                if state.recorder.isRecording {
-                    Button { Task { await state.stopMeeting() } } label: {
-                        Label("Stop", systemImage: "stop.circle.fill")
-                    }
-                    .tint(.red)
-                } else {
-                    Button { Task { await state.startMeeting() } } label: {
-                        Label("New note", systemImage: "square.and.pencil")
-                    }
-                    .disabled(state.recorder.state == .preparing)
-                }
+        .tint(Theme.accentFill)
+    }
+}
+
+private struct EmptyDetail: View {
+    @Environment(AppState.self) private var state
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Text("Your meeting notes live here")
+                .font(Theme.serif(28))
+                .tracking(-0.4)
+                .foregroundStyle(Theme.ink)
+            Text("Start a note when a call begins. Native Granola transcribes both sides of the conversation and writes up the notes when you're done.")
+                .font(.system(size: 13.5))
+                .lineSpacing(3)
+                .foregroundStyle(Theme.inkSecondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 400)
+            Button {
+                Task { await state.startMeeting() }
+            } label: {
+                Label("Start new note", systemImage: "square.and.pencil")
             }
+            .buttonStyle(PillButtonStyle(kind: .accent))
+            .disabled(state.recorder.isRecording || state.recorder.state == .preparing)
+            .padding(.top, 10)
         }
+        .padding(40)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Theme.canvas)
     }
 }
 
@@ -46,12 +79,13 @@ struct MeetingList: View {
         List(selection: $state.selectedMeetingID) {
             if !state.searchText.isEmpty {
                 ForEach(state.searchHits, id: \.self) { hit in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(hit.meetingTitle).font(.headline).lineLimit(1)
-                        Text(snippet(hit.snippet)).font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                        Text(hit.meetingStartedAt, format: .dateTime.month().day().hour().minute())
-                            .font(.caption2).foregroundStyle(.tertiary)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(hit.meetingTitle).font(.system(size: 13, weight: .medium)).lineLimit(1)
+                        Text(snippet(hit.snippet)).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(2)
+                        Text(hit.meetingStartedAt, format: .dateTime.month(.abbreviated).day().hour().minute())
+                            .font(.system(size: 11)).foregroundStyle(.tertiary)
                     }
+                    .padding(.vertical, 3)
                     .tag(hit.meetingID)
                 }
             } else {
@@ -66,6 +100,13 @@ struct MeetingList: View {
                         }
                     }
                 }
+            }
+        }
+        .overlay {
+            if !state.searchText.isEmpty && state.searchHits.isEmpty {
+                SidebarMessage(title: "No results", detail: "Nothing in your notes or transcripts matches “\(state.searchText)”.")
+            } else if state.searchText.isEmpty && state.meetings.isEmpty {
+                SidebarMessage(title: "No notes yet", detail: "Notes from your calls will show up here.")
             }
         }
     }
@@ -87,29 +128,51 @@ struct MeetingList: View {
     }
 }
 
+private struct SidebarMessage: View {
+    let title: String
+    let detail: String
+
+    var body: some View {
+        VStack(spacing: 4) {
+            Text(title).font(.system(size: 13, weight: .medium))
+            Text(detail).font(.system(size: 12)).foregroundStyle(.secondary).multilineTextAlignment(.center)
+        }
+        .padding(24)
+    }
+}
+
 struct MeetingRow: View {
     let meeting: Meeting
     let isRecording: Bool
+    @Environment(AppState.self) private var state
 
     var body: some View {
-        HStack {
+        HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(meeting.title).lineLimit(1)
-                HStack(spacing: 4) {
-                    Text(meeting.startedAt, format: .dateTime.hour().minute())
-                    if !meeting.attendees.isEmpty {
-                        Text("· \(meeting.attendees.count) people")
-                    }
-                }
-                .font(.caption).foregroundStyle(.secondary)
+                Text(meeting.title)
+                    .font(.system(size: 13, weight: .medium))
+                    .lineLimit(1)
+                Text(subtitle)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
-            Spacer()
+            Spacer(minLength: 4)
             if isRecording {
-                Image(systemName: "waveform").foregroundStyle(.green).symbolEffect(.variableColor.iterative)
+                DancingBars(level: max(state.recorder.levels[.microphone] ?? 0, state.recorder.levels[.system] ?? 0),
+                            height: 11)
             } else if meeting.enhancedNotes != nil {
-                Image(systemName: "sparkles").foregroundStyle(.secondary).font(.caption)
+                Image(systemName: "sparkles")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                    .help("Has AI notes")
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 3)
+    }
+
+    private var subtitle: String {
+        let time = meeting.startedAt.formatted(date: .omitted, time: .shortened)
+        return meeting.attendees.isEmpty ? time : "\(time) · \(People.short(meeting.attendees))"
     }
 }

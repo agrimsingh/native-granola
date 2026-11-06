@@ -12,7 +12,9 @@ struct MarkdownView: View {
             }
         }
         .font(.system(size: 14))
-        .lineSpacing(3)
+        .lineSpacing(4.5)
+        .foregroundStyle(Theme.ink)
+        .tint(Theme.accentInk)
         .textSelection(.enabled)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -52,39 +54,41 @@ struct MarkdownView: View {
         switch block {
         case let .heading(level, text):
             inline(text)
-                .font(level <= 1 ? .system(size: 20, weight: .bold)
-                      : level == 2 ? .system(size: 16, weight: .semibold)
-                      : .system(size: 14, weight: .semibold))
-                .padding(.top, isFirst ? 0 : (level <= 2 ? 16 : 8))
+                .font(Theme.serif(level <= 1 ? 23 : level == 2 ? 20 : 18))
+                .tracking(-0.2)
+                .lineSpacing(0)
+                .padding(.top, isFirst ? 0 : 20)
                 .padding(.bottom, 1)
         case let .bullet(indent, text):
-            row(indent: indent, marker: Circle().fill(.tertiary).frame(width: 5, height: 5)
-                .alignmentGuide(.firstTextBaseline) { $0[.bottom] + 1.5 }, text: text)
+            row(indent: indent,
+                marker: Circle().fill(Theme.inkTertiary).frame(width: 4.5, height: 4.5)
+                    .alignmentGuide(.firstTextBaseline) { $0[.bottom] + 2.5 },
+                text: text)
         case let .todo(indent, done, text):
             row(indent: indent,
-                marker: Image(systemName: done ? "checkmark.square.fill" : "square")
-                    .foregroundStyle(done ? Theme.accent : .secondary),
+                marker: Image(systemName: done ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 13))
+                    .foregroundStyle(done ? Theme.accentInk : Theme.inkTertiary),
                 text: text)
         case let .numbered(indent, number, text):
-            row(indent: indent, marker: Text("\(number).").foregroundStyle(.secondary).monospacedDigit(), text: text)
+            row(indent: indent, marker: Text("\(number).").foregroundStyle(Theme.inkSecondary).monospacedDigit(), text: text)
         case let .quote(text):
-            HStack(spacing: 10) {
-                Capsule().fill(Theme.accent.opacity(0.6)).frame(width: 3)
-                inline(text).foregroundStyle(.secondary)
-            }
-            .fixedSize(horizontal: false, vertical: true)
+            inline(text)
+                .foregroundStyle(Theme.inkSecondary)
+                .padding(.leading, 14)
+                .overlay(alignment: .leading) { Rectangle().fill(Theme.hairline).frame(width: 1) }
         case let .paragraph(text):
             inline(text)
         case .divider:
-            Divider().padding(.vertical, 6)
+            Rectangle().fill(Theme.hairline).frame(height: 1).padding(.vertical, 10)
         }
     }
 
     private func row(indent: Int, marker: some View, text: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
-            marker.frame(minWidth: 14, alignment: .center)
+            marker.frame(width: 14, alignment: .center)
             inline(text)
         }
-        .padding(.leading, CGFloat(indent) * 22 + 2)
+        .padding(.leading, CGFloat(indent) * 24)
     }
 }

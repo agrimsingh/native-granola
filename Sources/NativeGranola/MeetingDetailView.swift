@@ -9,139 +9,142 @@ struct MeetingDetailView: View {
     @State private var showTranscript = false
     @State private var saveTask: Task<Void, Never>?
 
-    enum Tab: String, CaseIterable {
-        case enhanced = "AI notes", notes = "My notes"
-
-        var systemImage: String { self == .enhanced ? "sparkles" : "pencil.line" }
-    }
+    enum Tab: String, CaseIterable { case enhanced = "AI notes", notes = "My notes" }
 
     private var isLive: Bool { state.recorder.isRecording && state.recorder.meeting?.id == meetingID }
 
     var body: some View {
-        HSplitView {
-            VStack(alignment: .leading, spacing: 0) {
-                if let draft {
-                    header(draft)
-                    content(draft)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .overlay(alignment: .bottom) { bottomBar(draft) }
+        HStack(spacing: 0) {
+            if let draft {
+                page(draft)
+                    .frame(minWidth: 320, maxWidth: .infinity, maxHeight: .infinity)
+                if showTranscript {
+                    Rectangle().fill(Theme.hairline).frame(width: 1)
+                    TranscriptPanel(meeting: draft, isLive: isLive)
+                        .frame(width: 320)
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }
-            .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color(nsColor: .textBackgroundColor))
-            if showTranscript, let draft {
-                TranscriptPanel(meeting: draft, isLive: isLive)
-                    .frame(minWidth: 280, idealWidth: 340, maxWidth: 480)
-            }
         }
+        .animation(.easeOut(duration: 0.2), value: showTranscript)
+        .background(Theme.canvas)
         .onAppear(perform: load)
         .onChange(of: state.meetings) { refreshFromStore() }
         .toolbar {
+            ToolbarSpacer(.flexible)
             ToolbarItemGroup {
                 IntelligenceActions(meetingID: meetingID)
-                Toggle(isOn: $showTranscript) { Label("Transcript", systemImage: "text.bubble") }
-                    .help("Show transcript")
             }
+        }
+    }
+
+    private func page(_ meeting: Meeting) -> some View {
+        ZStack(alignment: .bottom) {
+            if let streaming = state.streamingNotes[meetingID] {
+                document(meeting, markdown: streaming)
+            } else if tab == .enhanced, let enhanced = meeting.enhancedNotes {
+                document(meeting, markdown: enhanced)
+            } else {
+                VStack(alignment: .leading, spacing: 0) {
+                    header(meeting).readableColumn()
+                    editor(meeting).readableColumn()
+                }
+            }
+            LinearGradient(colors: [Theme.canvas.opacity(0), Theme.canvas], startPoint: .top, endPoint: .bottom)
+                .frame(height: 72)
+                .allowsHitTesting(false)
+            NoteDock(meeting: meeting, isLive: isLive, showTranscript: $showTranscript)
+                .padding(.bottom, 20)
+        }
+    }
+
+    private func document(_ meeting: Meeting, markdown: String) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                header(meeting)
+                MarkdownView(markdown: markdown)
+            }
+            .readableColumn()
+            .padding(.bottom, 110)
         }
     }
 
     private func header(_ meeting: Meeting) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            TextField("Untitled meeting", text: binding(\.title))
+        VStack(alignment: .leading, spacing: 14) {
+            TextField("Untitled meeting", text: binding(\.title), axis: .vertical)
                 .textFieldStyle(.plain)
-                .font(.system(size: 28, weight: .bold))
+                .font(Theme.serif(32))
+                .tracking(-0.5)
+                .lineLimit(1...3)
+                .foregroundStyle(Theme.ink)
             metadata(meeting)
             if state.streamingNotes[meetingID] != nil {
-                Label("Writing notes…", systemImage: "sparkles")
-                    .font(.callout.weight(.medium))
-                    .foregroundStyle(Theme.accent)
-                    .symbolEffect(.pulse)
-                    .padding(.vertical, 5)
+                HStack(spacing: 7) {
+                    Image(systemName: "sparkles").symbolEffect(.pulse)
+                    Text("Writing notes…")
+                }
+                .font(.system(size: 12.5, weight: .medium))
+                .foregroundStyle(Theme.accentInk)
+                .padding(.vertical, 5)
             } else if meeting.enhancedNotes != nil {
                 NoteTabSwitcher(tab: $tab)
             }
         }
-        .readableColumn()
-        .padding(.top, 28)
-        .padding(.bottom, 14)
+        .padding(.top, 30)
+        .padding(.bottom, 22)
     }
 
     private func metadata(_ meeting: Meeting) -> some View {
         HStack(spacing: 6) {
-            MetaChip(meeting.startedAt.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()),
-                     systemImage: "calendar")
+            MetaPill {
+                Image(systemName: "calendar")
+                Text(meeting.startedAt.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()))
+            }
             if let duration = meeting.duration {
-                MetaChip(Transcript.timestamp(duration), systemImage: "clock")
+                MetaPill { Text(Transcript.timestamp(duration)).monospacedDigit() }
             } else if isLive {
-                MetaChip(text: "Recording") { RecordingDot() }
+                MetaPill {
+                    RecordingDot()
+                    Text("Recording").foregroundStyle(Theme.danger)
+                }
             }
             if !meeting.attendees.isEmpty {
-                MetaChip(text: meeting.attendees.map(\.displayName).joined(separator: ", ")) {
-                    AvatarStack(attendees: meeting.attendees, size: 16)
+                MetaPill {
+                    AvatarStack(attendees: meeting.attendees, size: 15)
+                    Text(meeting.attendees.map(\.displayName).joined(separator: ", "))
                 }
                 .help(meeting.attendees.map(\.displayName).joined(separator: "\n"))
             }
             if let bundleID = meeting.sourceApp, let name = AppInfo.name(bundleID: bundleID) {
-                MetaChip(text: name) { MeetingGlyph(meeting: meeting, size: 14) }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func content(_ meeting: Meeting) -> some View {
-        if let streaming = state.streamingNotes[meetingID] {
-            ScrollView {
-                MarkdownView(markdown: streaming)
-                    .readableColumn()
-                    .padding(.top, 8).padding(.bottom, 80)
-            }
-        } else if tab == .enhanced, let enhanced = meeting.enhancedNotes {
-            ScrollView {
-                MarkdownView(markdown: enhanced)
-                    .readableColumn()
-                    .padding(.top, 8).padding(.bottom, 80)
-            }
-        } else {
-            GeometryReader { geometry in
-                let inset = max(Theme.pagePadding, (geometry.size.width - Theme.readableWidth) / 2) - 5
-                TextEditor(text: binding(\.rawNotes))
-                    .font(.system(size: 14))
-                    .lineSpacing(3)
-                    .scrollContentBackground(.hidden)
-                    .contentMargins(.horizontal, inset, for: .scrollContent)
-                    .contentMargins(.vertical, 8, for: .scrollContent)
-                    .overlay(alignment: .topLeading) {
-                        if meeting.rawNotes.isEmpty {
-                            Text(isLive ? "Jot down anything important. Native Granola is transcribing in the background."
-                                        : "Write notes…")
-                                .font(.system(size: 14))
-                                .foregroundStyle(.tertiary)
-                                .padding(.leading, inset + 5).padding(.top, 8)
-                                .allowsHitTesting(false)
-                        }
+                MetaPill {
+                    if let icon = AppInfo.icon(bundleID: bundleID) {
+                        Image(nsImage: icon).resizable().frame(width: 14, height: 14)
                     }
+                    Text(name)
+                }
             }
         }
     }
 
-    @ViewBuilder
-    private func bottomBar(_ meeting: Meeting) -> some View {
-        if isLive {
-            RecordingBar(meeting: meeting, showTranscript: $showTranscript)
-                .padding(.bottom, 20)
-        } else if meeting.enhancedNotes == nil, !meeting.isInProgress, Intelligence.hasXAIKey,
-                  !state.enhancing.contains(meetingID) {
-            Button {
-                Task { await state.generateNotes(meetingID: meetingID) }
-            } label: {
-                Label("Generate notes", systemImage: "sparkles")
-                    .padding(.horizontal, 6)
+    private func editor(_ meeting: Meeting) -> some View {
+        TextEditor(text: binding(\.rawNotes))
+            .font(.system(size: 14))
+            .lineSpacing(4.5)
+            .foregroundStyle(Theme.ink)
+            .tint(Theme.accentInk)
+            .scrollContentBackground(.hidden)
+            .overlay(alignment: .topLeading) {
+                if meeting.rawNotes.isEmpty {
+                    Text(isLive ? "Jot down anything important. Native Granola is transcribing in the background."
+                                : "Write notes…")
+                        .font(.system(size: 14))
+                        .foregroundStyle(Theme.inkSecondary)
+                        .padding(.leading, 5)
+                        .allowsHitTesting(false)
+                }
             }
-            .buttonStyle(.glassProminent)
-            .controlSize(.large)
-            .tint(Theme.accent)
-            .padding(.bottom, 20)
-        }
+            .padding(.horizontal, -5)
+            .padding(.bottom, 80)
     }
 
     private func binding(_ keyPath: WritableKeyPath<Meeting, String>) -> Binding<String> {
@@ -183,20 +186,21 @@ struct NoteTabSwitcher: View {
     @Namespace private var selection
 
     var body: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 0) {
             ForEach(MeetingDetailView.Tab.allCases, id: \.self) { option in
                 Button {
-                    withAnimation(.snappy(duration: 0.2)) { tab = option }
+                    withAnimation(.easeOut(duration: 0.18)) { tab = option }
                 } label: {
-                    Label(option.rawValue, systemImage: option.systemImage)
-                        .font(.callout.weight(.medium))
-                        .foregroundStyle(tab == option ? .primary : .secondary)
-                        .padding(.horizontal, 11)
-                        .padding(.vertical, 5)
+                    Text(option.rawValue)
+                        .font(.system(size: 12.5, weight: .medium))
+                        .foregroundStyle(tab == option ? Theme.ink : Theme.inkSecondary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 4)
                         .background {
                             if tab == option {
                                 Capsule()
-                                    .fill(Color.primary.opacity(0.1))
+                                    .fill(Theme.raised)
+                                    .shadow(color: .black.opacity(0.08), radius: 1.5, y: 1)
                                     .matchedGeometryEffect(id: "selection", in: selection)
                             }
                         }
@@ -206,55 +210,63 @@ struct NoteTabSwitcher: View {
             }
         }
         .padding(2)
-        .background(Color.primary.opacity(0.04), in: Capsule())
+        .background(Theme.softFill, in: Capsule())
     }
 }
 
-/// Floating controls shown at the bottom of a meeting while it's being recorded.
-struct RecordingBar: View {
+/// The floating pill at the bottom of a note: transcript toggle with audio bars, plus the one
+/// action that matters right now (stop while live, generate once the call is over).
+struct NoteDock: View {
     let meeting: Meeting
+    let isLive: Bool
     @Binding var showTranscript: Bool
     @Environment(AppState.self) private var state
 
     var body: some View {
         let recorder = state.recorder
-        HStack(spacing: 14) {
-            HStack(spacing: 7) {
-                RecordingDot()
-                ElapsedTime(since: meeting.startedAt)
-                    .font(.callout.weight(.medium))
-            }
-            HStack(spacing: 12) {
-                speaker("Me", level: recorder.levels[.microphone] ?? 0)
-                speaker("Them", level: recorder.levels[.system] ?? 0)
-            }
-            Divider().frame(height: 16)
+        HStack(spacing: 4) {
             Button {
                 showTranscript.toggle()
             } label: {
-                Image(systemName: "text.bubble")
+                HStack(spacing: 8) {
+                    DancingBars(level: isLive ? max(recorder.levels[.microphone] ?? 0, recorder.levels[.system] ?? 0) : nil)
+                    if isLive {
+                        ElapsedTime(since: meeting.startedAt)
+                    } else {
+                        Text("Transcript")
+                    }
+                }
+                .font(.system(size: 12.5, weight: .medium))
+                .foregroundStyle(Theme.ink)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .background(showTranscript ? Theme.softFill : .clear, in: Capsule())
+                .contentShape(Capsule())
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(.plain)
             .help(showTranscript ? "Hide transcript" : "Show transcript")
-            Button {
-                Task { await state.stopMeeting() }
-            } label: {
-                Label("Stop", systemImage: "stop.fill")
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(.red)
-        }
-        .padding(.leading, 16)
-        .padding(.trailing, 8)
-        .padding(.vertical, 7)
-        .glassEffect(.regular, in: Capsule())
-    }
 
-    private func speaker(_ label: String, level: Float) -> some View {
-        HStack(spacing: 5) {
-            LiveBars(level: level)
-            Text(label).font(.caption).foregroundStyle(.secondary)
+            if isLive {
+                Button {
+                    Task { await state.stopMeeting() }
+                } label: {
+                    Label("Stop", systemImage: "stop.fill")
+                }
+                .buttonStyle(PillButtonStyle(kind: .danger))
+            } else if meeting.enhancedNotes == nil, !meeting.isInProgress, Intelligence.hasXAIKey,
+                      state.streamingNotes[meeting.id] == nil {
+                Button {
+                    Task { await state.generateNotes(meetingID: meeting.id) }
+                } label: {
+                    Label("Generate notes", systemImage: "sparkles")
+                }
+                .buttonStyle(PillButtonStyle(kind: .accent))
+                .disabled(state.enhancing.contains(meeting.id))
+            }
         }
+        .padding(4)
+        .background(Theme.raised, in: Capsule())
+        .shadow(color: .black.opacity(0.14), radius: 16, y: 6)
     }
 }
 
@@ -265,50 +277,67 @@ struct TranscriptPanel: View {
 
     var body: some View {
         let segments = state.segments(for: meeting)
+        let hasVolatile = isLive && state.recorder.volatileText.values.contains { !$0.isEmpty }
         VStack(spacing: 0) {
             HStack(spacing: 8) {
-                Text("Transcript").font(.headline)
+                Text("Transcript")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Theme.ink)
                 if isLive { RecordingDot() }
                 Spacer()
                 Button {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(Transcript.format(segments), forType: .string)
-                } label: { Image(systemName: "doc.on.doc") }
+                } label: {
+                    Image(systemName: "doc.on.doc").foregroundStyle(Theme.inkSecondary)
+                }
                 .buttonStyle(.borderless)
                 .help("Copy transcript")
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            Divider()
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 14) {
-                        ForEach(TranscriptTurn.turns(segments)) { turn in
-                            Bubble(text: turn.text, source: turn.source, time: turn.start)
-                        }
-                        if isLive {
-                            ForEach(TranscriptSource.allCases, id: \.self) { source in
-                                if let text = state.recorder.volatileText[source], !text.isEmpty {
-                                    Bubble(text: text, source: source, time: nil).opacity(0.55)
+            .frame(height: 42)
+            Rectangle().fill(Theme.hairline).frame(height: 1)
+            if segments.isEmpty && !hasVolatile {
+                VStack(spacing: 6) {
+                    Image(systemName: isLive ? "waveform" : "waveform.slash")
+                        .font(.system(size: 20))
+                        .foregroundStyle(Theme.inkTertiary)
+                        .padding(.bottom, 4)
+                    Text(isLive ? "Listening…" : "No transcript")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Theme.ink)
+                    if isLive {
+                        Text("What you and the other side say will appear here.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Theme.inkSecondary)
+                            .multilineTextAlignment(.center)
+                    }
+                }
+                .padding(24)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 14) {
+                            ForEach(TranscriptTurn.turns(segments)) { turn in
+                                Bubble(text: turn.text, source: turn.source, time: turn.start)
+                            }
+                            if isLive {
+                                ForEach(TranscriptSource.allCases, id: \.self) { source in
+                                    if let text = state.recorder.volatileText[source], !text.isEmpty {
+                                        Bubble(text: text, source: source, time: nil).opacity(0.55)
+                                    }
                                 }
                             }
+                            Color.clear.frame(height: 1).id("bottom")
                         }
-                        Color.clear.frame(height: 1).id("bottom")
+                        .padding(16)
                     }
-                    .padding(16)
-                }
-                .onChange(of: segments.count) { withAnimation { proxy.scrollTo("bottom") } }
-            }
-            .overlay {
-                if segments.isEmpty, !isLive || state.recorder.volatileText.values.allSatisfy(\.isEmpty) {
-                    ContentUnavailableView(
-                        isLive ? "Listening…" : "No transcript",
-                        systemImage: isLive ? "waveform" : "waveform.slash",
-                        description: Text(isLive ? "What you and the other side say will show up here." : ""))
+                    .onChange(of: segments.count) { withAnimation { proxy.scrollTo("bottom") } }
                 }
             }
         }
-        .background(.background.secondary)
+        .background(Theme.sunken)
     }
 }
 
@@ -341,22 +370,25 @@ struct Bubble: View {
     var body: some View {
         let mine = source == .microphone
         HStack {
-            if mine { Spacer(minLength: 36) }
+            if mine { Spacer(minLength: 32) }
             VStack(alignment: mine ? .trailing : .leading, spacing: 4) {
                 if let time {
                     Text("\(source.speakerLabel) · \(Transcript.timestamp(time))")
-                        .font(.caption2.weight(.medium)).foregroundStyle(.secondary)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Theme.inkSecondary)
+                        .monospacedDigit()
                         .padding(.horizontal, 4)
                 }
                 Text(text)
-                    .font(.callout)
-                    .lineSpacing(2)
+                    .font(.system(size: 13))
+                    .lineSpacing(2.5)
+                    .foregroundStyle(Theme.ink)
                     .textSelection(.enabled)
                     .padding(.horizontal, 12).padding(.vertical, 8)
-                    .background(mine ? Theme.accent.opacity(0.2) : Color.primary.opacity(0.07),
+                    .background(mine ? Theme.accentGround : Theme.raised,
                                 in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
-            if !mine { Spacer(minLength: 36) }
+            if !mine { Spacer(minLength: 32) }
         }
     }
 }
