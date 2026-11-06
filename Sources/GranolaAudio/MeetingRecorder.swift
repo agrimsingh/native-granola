@@ -166,6 +166,9 @@ public final class MeetingRecorder {
                 let capture = MicrophoneCapture(voiceProcessing: options.echoCancellation)
                 try capture.start(handler: pipeline.handler)
                 mic = capture
+                if initial, options.echoCancellation, !capture.isVoiceProcessingActive {
+                    warnings.append("Echo cancellation couldn't start with these audio devices. On speakers, the other side may also be transcribed as you.")
+                }
             } else if initial {
                 warnings.append("Microphone access is off, so your side of the call won't be transcribed.")
             }

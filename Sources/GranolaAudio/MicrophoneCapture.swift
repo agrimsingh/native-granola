@@ -12,6 +12,8 @@ public final class MicrophoneCapture: @unchecked Sendable {
     private var handler: Handler?
     private var configObserver: NSObjectProtocol?
     public let voiceProcessing: Bool
+    /// Whether echo cancellation is actually on; it's dropped when it can't start with the current devices.
+    public private(set) var isVoiceProcessingActive = false
 
     public init(voiceProcessing: Bool = true) {
         self.voiceProcessing = voiceProcessing
@@ -53,6 +55,19 @@ public final class MicrophoneCapture: @unchecked Sendable {
 
     private func startEngine() throws {
         guard let handler else { return }
+        do {
+            try startEngine(handler: handler, voiceProcessing: voiceProcessing)
+        } catch where voiceProcessing {
+            // Voice processing can fail to initialize with some device combinations (-10875).
+            log.error("Microphone failed to start with voice processing, retrying without: \(String(describing: error))")
+            engine.inputNode.removeTap(onBus: 0)
+            engine.stop()
+            engine = AVAudioEngine()
+            try startEngine(handler: handler, voiceProcessing: false)
+        }
+    }
+
+    private func startEngine(handler: @escaping Handler, voiceProcessing: Bool) throws {
         let input = engine.inputNode
         if voiceProcessing {
             do {
@@ -71,5 +86,6 @@ public final class MicrophoneCapture: @unchecked Sendable {
         }
         engine.prepare()
         try engine.start()
+        isVoiceProcessingActive = input.isVoiceProcessingEnabled
     }
 }
