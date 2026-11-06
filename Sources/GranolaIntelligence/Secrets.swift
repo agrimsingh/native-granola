@@ -95,10 +95,39 @@ public final class InMemoryKeychain: KeychainStore, @unchecked Sendable {
     }
 }
 
+/// Remembers reads, including misses and failures, so the keychain is asked at most once per item per
+/// process. macOS can prompt for the login password on every read by a rebuilt binary, and SwiftUI
+/// views check for keys on each render.
+public final class CachingKeychain: KeychainStore, @unchecked Sendable {
+    private let base: any KeychainStore
+    private let lock = NSLock()
+    private var cache: [String: String?] = [:]
+
+    public init(_ base: any KeychainStore) { self.base = base }
+
+    public func read(service: String, account: String) throws -> String? {
+        let key = "\(service)/\(account)"
+        if let cached = lock.withLock({ cache[key] }) { return cached }
+        let value = try? base.read(service: service, account: account)
+        lock.withLock { cache[key] = .some(value) }
+        return value
+    }
+
+    public func write(_ value: String, service: String, account: String) throws {
+        try base.write(value, service: service, account: account)
+        lock.withLock { cache["\(service)/\(account)"] = .some(value) }
+    }
+
+    public func delete(service: String, account: String) throws {
+        try base.delete(service: service, account: account)
+        lock.withLock { cache["\(service)/\(account)"] = .some(nil) }
+    }
+}
+
 /// API keys: the keychain is authoritative, environment variables are a fallback.
 public struct Secrets: Sendable {
     public static let service = "com.nativegranola.secrets"
-    public static let shared = Secrets()
+    public static let shared = Secrets(keychain: CachingKeychain(SystemKeychain()))
 
     public enum Source: String, Sendable { case keychain, environment }
 

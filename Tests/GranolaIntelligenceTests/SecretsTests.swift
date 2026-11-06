@@ -44,4 +44,31 @@ import Testing
         #expect(try XAIClient(secrets: full).apiKey == "k")
         #expect(try NotionClient(secrets: full).token == "t")
     }
+
+    @Test func cachingKeychainReadsEachItemOnce() throws {
+        final class Counting: KeychainStore, @unchecked Sendable {
+            let inner = InMemoryKeychain(["com.nativegranola.secrets/xaiAPIKey": "k"])
+            var reads = 0
+            func read(service: String, account: String) throws -> String? {
+                reads += 1
+                return try inner.read(service: service, account: account)
+            }
+            func write(_ value: String, service: String, account: String) throws {
+                try inner.write(value, service: service, account: account)
+            }
+            func delete(service: String, account: String) throws { try inner.delete(service: service, account: account) }
+        }
+        let counting = Counting()
+        let secrets = Secrets(keychain: CachingKeychain(counting), environment: [:])
+        for _ in 0..<5 {
+            #expect(secrets.get(.xaiAPIKey) == "k")
+            #expect(secrets.get(.notionToken) == nil)
+        }
+        #expect(counting.reads == 2)
+        try secrets.set("t", for: .notionToken)
+        #expect(secrets.get(.notionToken) == "t")
+        try secrets.delete(.xaiAPIKey)
+        #expect(secrets.get(.xaiAPIKey) == nil)
+        #expect(counting.reads == 2)
+    }
 }
