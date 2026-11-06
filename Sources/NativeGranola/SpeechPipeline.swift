@@ -75,12 +75,17 @@ final class SpeechPipeline {
     private func run(_ meetingID: String) async {
         guard !Task.isCancelled else { return finish(meetingID, .failed("Cancelled")) }
         let store = AppState.shared.store
+        let model = SpeechPreferences.model
+        let languageSupported = model.supports(.current)
         let processor = PostMeetingProcessor(store: store, options: .init(
-            retranscribeWith: SpeechPreferences.retranscribe ? SpeechPreferences.model : nil,
+            retranscribeWith: SpeechPreferences.retranscribe && languageSupported ? model : nil,
             separateSpeakers: SpeechPreferences.separateSpeakers))
         do {
             var outcome = try await processor.run(meetingID: meetingID) { stage in
                 Task { @MainActor in SpeechPipeline.shared.advance(meetingID, to: stage) }
+            }
+            if SpeechPreferences.retranscribe, !languageSupported {
+                outcome.warnings.append("Kept the live transcript: \(model.displayName) doesn't support \(Locale.current.identifier)")
             }
             if SpeechPreferences.nameSpeakers, outcome.speakerCount > 0, Intelligence.hasXAIKey,
                let meeting = try store.meeting(id: meetingID) {

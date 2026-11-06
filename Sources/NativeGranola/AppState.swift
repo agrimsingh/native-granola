@@ -66,6 +66,7 @@ final class AppState {
     func startMeeting(title: String? = nil, attendees: [Attendee] = [], calendarEventID: String? = nil,
                       sourceApp: String? = nil) async {
         guard !recorder.isRecording else { return }
+        let sourceApp = sourceApp ?? DetectionCoordinator.shared.detector.activeMicApps.first?.bundleID
         let meeting = Meeting(
             title: title ?? "Meeting \(Date().formatted(date: .abbreviated, time: .shortened))",
             calendarEventID: calendarEventID, attendees: attendees, sourceApp: sourceApp)

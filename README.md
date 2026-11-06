@@ -101,7 +101,7 @@ The code lives in six modules:
 
 ## Limitations
 
-- Meetings started by hand, and meetings in a browser tab, record all of the browser's or the Mac's audio. Music or a video playing in the same place lands in the transcript.
+- A meeting in a browser tab records the whole browser, so a video in another tab of the same browser lands in the transcript. A meeting started while no app is using the microphone records all system audio.
 - Speaker labels only appear after the call; during it, everyone on the far side is "Them". Similar voices are sometimes merged into one speaker.
-- Transcription languages are whatever Apple's on-device model supports for your locale.
-- Echo cancellation, the call-detection prompts and Notion export pass their tests but have had little real-world use. Speaker separation has only been tested on synthetic voices.
+- Live transcription supports whatever languages Apple's on-device model supports for your locale. The after-call pass with Parakeet covers 25 European languages; meetings in other languages keep the live transcript.
+- Echo cancellation starts, but hasn't been tested on a real call over speakers. The call-detection prompts and Notion export pass their tests but have had little real-world use. Speaker separation has only been tested on synthetic voices.

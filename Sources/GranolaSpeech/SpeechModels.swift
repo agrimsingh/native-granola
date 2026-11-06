@@ -13,6 +13,20 @@ public enum ParakeetModel: String, Sendable, CaseIterable, Codable {
 
     public var displayName: String { self == .v3 ? "Parakeet v3 (multilingual)" : "Parakeet v2 (English)" }
 
+    /// ISO 639-1 codes the model was trained on.
+    public var languageCodes: Set<String> {
+        switch self {
+        case .v2: ["en"]
+        case .v3: ["bg", "hr", "cs", "da", "nl", "en", "et", "fi", "fr", "de", "el", "hu", "it", "lv", "lt",
+                   "mt", "pl", "pt", "ro", "sk", "sl", "es", "sv", "ru", "uk"]
+        }
+    }
+
+    /// Re-transcribing speech in any other language would replace a good live transcript with gibberish.
+    public func supports(_ locale: Locale) -> Bool {
+        locale.language.languageCode.map { languageCodes.contains($0.identifier) } ?? false
+    }
+
     public var cacheDirectory: URL { AsrModels.defaultCacheDirectory(for: version) }
 
     public var isDownloaded: Bool { AsrModels.modelsExist(at: cacheDirectory, version: version) }
