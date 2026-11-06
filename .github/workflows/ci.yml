@@ -1,0 +1,41 @@
+# Builds, tests and bundles the app (ad hoc signed) on every push and pull request.
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: |
+          sudo xcode-select -s /Applications/Xcode.app
+          xcodebuild -version
+          swift --version
+      - uses: actions/cache@v4
+        with:
+          path: |
+            .build
+            ~/Library/Caches/org.swift.swiftpm
+          key: spm-${{ runner.os }}-${{ hashFiles('Package.resolved', 'Package.swift') }}
+          restore-keys: spm-${{ runner.os }}-
+      - name: Test
+        run: swift test
+      - name: Bundle
+        run: |
+          scripts/bundle.sh release
+          ditto -c -k --keepParent build/NativeGranola.app build/NativeGranola-unsigned.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NativeGranola-unsigned
+          path: build/NativeGranola-unsigned.zip
+          retention-days: 7
