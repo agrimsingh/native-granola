@@ -8,7 +8,7 @@ let package = Package(
         .executable(name: "NativeGranola", targets: ["NativeGranola"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.18.2"),
+        .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.18.2", traits: ["Diarizer"]),
     ],
     targets: [
         .target(
