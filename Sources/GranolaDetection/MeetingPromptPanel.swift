@@ -186,7 +186,7 @@ struct PromptCardView: View {
             }
             HStack(spacing: 8) {
                 if let onJoin {
-                    Button("Join & take notes", action: onJoin).buttonStyle(PromptButtonStyle(primary: true))
+                    Button(joinTitle, action: onJoin).buttonStyle(PromptButtonStyle(primary: true))
                     Button("Take notes", action: onTakeNotes).buttonStyle(PromptButtonStyle(primary: false))
                 } else {
                     Button("Take notes", action: onTakeNotes).buttonStyle(PromptButtonStyle(primary: true))
@@ -209,6 +209,15 @@ struct PromptCardView: View {
         .onHover(perform: onHover)
     }
 
+    /// "Join Zoom & take notes" when the link's service is recognisable.
+    private var joinTitle: String {
+        let host = suggestion.conferenceURL?.host()?.lowercased() ?? ""
+        let service = [("zoom.us", "Zoom"), ("meet.google.com", "Meet"), ("teams.microsoft.com", "Teams"),
+                       ("teams.live.com", "Teams"), ("webex.com", "Webex"), ("around.co", "Around")]
+            .first { host == $0.0 || host.hasSuffix("." + $0.0) }?.1
+        return service.map { "Join \($0) & take notes" } ?? "Join & take notes"
+    }
+
     private var sourceLabel: String {
         switch suggestion.kind {
         case .calendar(let event): event.calendarTitle ?? "Calendar"
@@ -223,8 +232,8 @@ private enum PromptPalette {
     static let ink = adaptive(0x292929, 0xECECE6)
     static let inkSecondary = adaptive(0x6B6B67, 0xA3A39E)
     static let accentInk = adaptive(0x5B6F00, 0xB2C455)
-    static let accentFill = adaptive(0x5B6F00, 0x6B8212)
-    static let accentFillPressed = adaptive(0x4C5616, 0x7A9418)
+    static let accentFill = adaptive(0x5B6F00, 0x5E7210)
+    static let accentFillPressed = adaptive(0x4C5616, 0x6B8212)
     static let softFill = adaptive(0x625A22, 0xFFFFFF, lightAlpha: 0.08, darkAlpha: 0.08)
     static let softFillPressed = adaptive(0x56512E, 0xFFFFFF, lightAlpha: 0.14, darkAlpha: 0.13)
     static let hairline = adaptive(0x47432A, 0xFFFFFF, lightAlpha: 0.14, darkAlpha: 0.1)

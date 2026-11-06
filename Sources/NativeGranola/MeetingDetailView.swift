@@ -269,6 +269,7 @@ struct NoteTabSwitcher: View {
                             if tab == option {
                                 Capsule()
                                     .fill(Theme.segmentSelected)
+                                    .overlay(Capsule().strokeBorder(Theme.hairline, lineWidth: 0.5))
                                     .shadow(color: .black.opacity(0.08), radius: 1.5, y: 1)
                                     .matchedGeometryEffect(id: "selection", in: selection)
                             }
@@ -302,14 +303,14 @@ struct NoteDock: View {
                     if isLive {
                         ElapsedTime(since: meeting.startedAt)
                     } else {
-                        Text("Transcript")
+                        Text(showTranscript ? "Hide transcript" : "Transcript")
                     }
                 }
                 .font(.system(size: 12.5, weight: .medium))
                 .foregroundStyle(showTranscript ? Theme.accentInk : Theme.ink)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 7)
-                .background(showTranscript ? Theme.accentGround : .clear, in: Capsule())
+                .background(showTranscript ? Theme.match : .clear, in: Capsule())
                 .contentShape(Capsule())
             }
             .buttonStyle(.plain)
@@ -450,9 +451,8 @@ struct Bubble: View {
             if mine { Spacer(minLength: 32) }
             VStack(alignment: mine ? .trailing : .leading, spacing: 4) {
                 if let time {
-                    Text("\(speaker) · \(Transcript.timestamp(time))")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Theme.inkSecondary)
+                    Text("\(Text(speaker).foregroundStyle(Theme.ink).fontWeight(.semibold))  \(Text(Transcript.timestamp(time)).foregroundStyle(Theme.inkSecondary))")
+                        .font(.system(size: 11.5, weight: .medium))
                         .monospacedDigit()
                         .padding(.horizontal, 4)
                 }

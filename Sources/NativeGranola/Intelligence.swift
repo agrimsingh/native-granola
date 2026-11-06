@@ -108,6 +108,7 @@ struct IntelligenceActions: View {
             }
         } label: {
             Label(busy ? "Generating…" : "Generate notes", systemImage: "sparkles")
+                .labelStyle(.titleAndIcon)
         } primaryAction: {
             Task { await state.generateNotes(meetingID: meetingID) }
         }

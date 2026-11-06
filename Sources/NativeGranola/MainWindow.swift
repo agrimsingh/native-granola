@@ -85,12 +85,15 @@ private struct EmptyDetail: View {
     @Environment(WindowLayout.self) private var layout: WindowLayout?
 
     var body: some View {
+        let hasNotes = !state.meetings.isEmpty
         VStack(spacing: 12) {
-            Text("Your meeting notes live here")
+            Text(hasNotes ? "Pick a note, or start a new one" : "Your meeting notes live here")
                 .font(Theme.serif(28))
                 .tracking(-0.4)
                 .foregroundStyle(Theme.ink)
-            Text("Start a note when a call begins. Native Granola transcribes both sides of the conversation and writes up the notes when you're done.")
+            Text(hasNotes
+                 ? "Your past notes are in the sidebar. Start a new one when a call begins and Native Granola will transcribe both sides of the conversation."
+                 : "Start a note when a call begins. Native Granola transcribes both sides of the conversation and writes up the notes when you're done.")
                 .font(.system(size: 13.5))
                 .lineSpacing(3)
                 .foregroundStyle(Theme.inkSecondary)
@@ -228,7 +231,7 @@ private struct SearchResultRow: View {
                     .font(.system(size: 13, weight: .medium))
                     .lineLimit(1)
                 Text(hits[0].meetingStartedAt, format: .dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute())
-                    .font(.system(size: 11.5))
+                    .font(.system(size: 12))
                     .foregroundStyle(Theme.inkSecondary)
             }
             let matches = hits.filter { $0.kind != .title }
@@ -290,7 +293,7 @@ private struct SearchResultRow: View {
     /// highlighted; bold from the notes themselves goes back to plain text.
     static func snippet(_ text: String, query: String) -> AttributedString {
         let terms = query.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init)
-        let flat = text
+        let joined = text
             .split(whereSeparator: \.isNewline)
             .map { line in
                 line.trimmingCharacters(in: .whitespaces)
@@ -298,6 +301,7 @@ private struct SearchResultRow: View {
             }
             .filter { !$0.isEmpty }
             .joined(separator: " · ")
+        let flat = leadingUpToMatch(joined, terms: terms)
         let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
         var result = (try? AttributedString(markdown: flat, options: options)) ?? AttributedString(flat)
         for run in result.runs where run.inlinePresentationIntent?.contains(.stronglyEmphasized) == true {
@@ -310,6 +314,23 @@ private struct SearchResultRow: View {
             }
         }
         return result
+    }
+}
+
+extension SearchResultRow {
+    /// Trims long lead-ins so the first match lands inside the two visible lines.
+    static func leadingUpToMatch(_ text: String, terms: [String], keep: Int = 28) -> String {
+        let lower = text.lowercased()
+        guard let match = terms.compactMap({ lower.range(of: "**" + $0) }).min(by: { $0.lowerBound < $1.lowerBound }),
+              lower.distance(from: lower.startIndex, to: match.lowerBound) > keep * 2 else { return text }
+        let cutOffset = lower.distance(from: lower.startIndex, to: match.lowerBound) - keep
+        var cut = text.index(text.startIndex, offsetBy: cutOffset)
+        let dropped = text[..<cut]
+        guard dropped.components(separatedBy: "**").count % 2 == 1 else { return text }
+        if let space = text[cut...].firstIndex(of: " "), space < text.index(text.startIndex, offsetBy: cutOffset + keep) {
+            cut = text.index(after: space)
+        }
+        return "…" + text[cut...]
     }
 }
 
@@ -347,7 +368,7 @@ struct MeetingRow: View {
                         Text(subtitle).foregroundStyle(Theme.inkSecondary)
                     }
                 }
-                .font(.system(size: 11.5))
+                .font(.system(size: 12))
                 .lineLimit(1)
             }
             Spacer(minLength: 4)

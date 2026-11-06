@@ -15,10 +15,10 @@ enum Theme {
     static let inkTertiary = adaptive(0x8F8F8A, 0x85857F)
 
     static let accentInk = adaptive(0x5B6F00, 0xB2C455)
-    static let accentFill = adaptive(0x5B6F00, 0x6B8212)
-    static let accentFillHover = adaptive(0x4C5616, 0x7A9418)
+    static let accentFill = adaptive(0x5B6F00, 0x5E7210)
+    static let accentFillHover = adaptive(0x4C5616, 0x6B8212)
     static let accentGround = adaptive(0xEEF2D8, 0x2A3016)
-    static let selection = adaptive(0x6B7A1E, 0xFFFFFF, lightAlpha: 0.16, darkAlpha: 0.10)
+    static let selection = adaptive(0x5E5A3C, 0xFFFFFF, lightAlpha: 0.13, darkAlpha: 0.10)
     static let match = adaptive(0x8FA51F, 0xB2C455, lightAlpha: 0.26, darkAlpha: 0.30)
     static let segmentSelected = adaptive(0xFFFFFF, 0x3A3934)
     static let onAccent = Color(hex: 0xFCFCF8)
