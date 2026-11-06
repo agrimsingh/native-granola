@@ -87,12 +87,12 @@ private struct EmptyDetail: View {
     var body: some View {
         let hasNotes = !state.meetings.isEmpty
         VStack(spacing: 12) {
-            Text(hasNotes ? "Pick a note, or start a new one" : "Your meeting notes live here")
+            Text("Your meeting notes live here")
                 .font(Theme.serif(28))
                 .tracking(-0.4)
                 .foregroundStyle(Theme.ink)
             Text(hasNotes
-                 ? "Your past notes are in the sidebar. Start a new one when a call begins and Native Granola will transcribe both sides of the conversation."
+                 ? "Pick one from the sidebar, or start a new note when a call begins. Native Granola transcribes both sides of the conversation."
                  : "Start a note when a call begins. Native Granola transcribes both sides of the conversation and writes up the notes when you're done.")
                 .font(.system(size: 13.5))
                 .lineSpacing(3)
@@ -229,6 +229,7 @@ private struct SearchResultRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(hits[0].meetingTitle)
                     .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Theme.ink)
                     .lineLimit(1)
                 Text(hits[0].meetingStartedAt, format: .dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute())
                     .font(.system(size: 12))
@@ -357,6 +358,7 @@ struct MeetingRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(meeting.title)
                     .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Theme.ink)
                     .lineLimit(1)
                 Group {
                     if isRecording {
