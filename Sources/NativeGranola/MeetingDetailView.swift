@@ -9,6 +9,7 @@ struct MeetingDetailView: View {
     @State private var showTranscript = false
     @State private var saveTask: Task<Void, Never>?
     @State private var pageWidth: CGFloat = 800
+    @State private var detailWidth: CGFloat = 1000
 
     enum Tab: String, CaseIterable { case enhanced = "AI notes", notes = "My notes" }
 
@@ -22,14 +23,15 @@ struct MeetingDetailView: View {
                 if showTranscript {
                     Rectangle().fill(Theme.hairline).frame(width: 1)
                         .ignoresSafeArea(.container, edges: .top)
-                    TranscriptPanel(meeting: draft, isLive: isLive)
-                        .frame(width: 320)
+                    TranscriptPanel(meeting: draft, isLive: isLive, onClose: { showTranscript = false })
+                        .frame(width: detailWidth < 720 ? 280 : 320)
                         .background { Theme.sunken.ignoresSafeArea(.container, edges: .top) }
                         .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }
         }
         .animation(.easeOut(duration: 0.2), value: showTranscript)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { detailWidth = $0 }
         .background(Theme.canvas)
         .onAppear(perform: load)
         .onChange(of: state.meetings) { refreshFromStore() }
@@ -56,8 +58,8 @@ struct MeetingDetailView: View {
             }
             VStack(spacing: 0) {
                 LinearGradient(colors: [Theme.canvas.opacity(0), Theme.canvas], startPoint: .top, endPoint: .bottom)
-                    .frame(height: 40)
-                Theme.canvas.frame(height: 52)
+                    .frame(height: 32)
+                Theme.canvas.frame(height: 46)
             }
             .allowsHitTesting(false)
             NoteDock(meeting: meeting, isLive: isLive, showTranscript: $showTranscript)
@@ -70,6 +72,7 @@ struct MeetingDetailView: View {
 
     private var titleSize: CGFloat {
         switch pageWidth {
+        case ..<400: 23
         case ..<560: 26
         case ..<760: 29
         case ..<1000: 32
@@ -122,13 +125,14 @@ struct MeetingDetailView: View {
             metadataRow(meeting, density: .tight).fixedSize()
             metadataRow(meeting, density: .minimal).fixedSize()
             metadataRow(meeting, density: .micro).fixedSize()
-            metadataRow(meeting, density: .micro)
+            metadataRow(meeting, density: .nano).fixedSize()
+            metadataRow(meeting, density: .nano)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// Steps down in order: weekday, then time, then names become a count, then the app name goes.
-    private enum MetaDensity: Comparable { case full, compact, tight, minimal, micro }
+    /// Steps down in order: weekday, time, names to a count, duration, app name, people count.
+    private enum MetaDensity: Comparable { case full, compact, tight, minimal, micro, nano }
 
     private func metadataRow(_ meeting: Meeting, density: MetaDensity) -> some View {
         let names = meeting.attendees.map(\.displayName)
@@ -149,7 +153,7 @@ struct MeetingDetailView: View {
                     : density == .compact ? .dateTime.month(.abbreviated).day().hour().minute()
                     : .dateTime.month(.abbreviated).day()))
                     .monospacedDigit()
-                if let duration = meeting.duration {
+                if let duration = meeting.duration, density < .minimal {
                     Text("·").foregroundStyle(Theme.inkTertiary)
                     Text(Self.duration(duration))
                 }
@@ -162,8 +166,8 @@ struct MeetingDetailView: View {
                     switch density {
                     case .full: Text(names.joined(separator: ", "))
                     case .compact: Text(People.short(meeting.attendees))
-                    case .tight, .minimal: Text(names.count == 1 ? People.short(meeting.attendees) : "\(names.count) people")
-                    case .micro: if names.count > 3 { Text("+\(names.count - 3)") }
+                    case .tight, .minimal, .micro: Text(names.count == 1 ? People.short(meeting.attendees) : "\(names.count) people")
+                    case .nano: if names.count > 3 { Text("+\(names.count - 3)") }
                     }
                 }
                 .help(names.joined(separator: "\n"))
@@ -173,7 +177,7 @@ struct MeetingDetailView: View {
                     if let icon = AppInfo.icon(bundleID: app.id) {
                         Image(nsImage: icon).resizable().frame(width: 14, height: 14)
                     }
-                    if density < .minimal { Text(app.name) }
+                    if density < .micro { Text(app.name) }
                 }
                 .help(app.name)
                 .accessibilityLabel(app.name)
@@ -258,7 +262,7 @@ struct NoteTabSwitcher: View {
                         .font(.system(size: 12.5, weight: .medium))
                         .foregroundStyle(tab == option ? Theme.ink : Theme.inkSecondary)
                         .padding(.horizontal, 12)
-                        .padding(.vertical, 4)
+                        .padding(.vertical, 5)
                         .background {
                             if tab == option {
                                 Capsule()
@@ -336,6 +340,7 @@ struct NoteDock: View {
 struct TranscriptPanel: View {
     let meeting: Meeting
     let isLive: Bool
+    let onClose: () -> Void
     @Environment(AppState.self) private var state
 
     var body: some View {
@@ -356,6 +361,11 @@ struct TranscriptPanel: View {
                 }
                 .buttonStyle(.borderless)
                 .help("Copy transcript")
+                Button(action: onClose) {
+                    Image(systemName: "xmark").font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.inkSecondary)
+                }
+                .buttonStyle(.borderless)
+                .help("Hide transcript")
             }
             .padding(.horizontal, 16)
             .frame(height: 42)

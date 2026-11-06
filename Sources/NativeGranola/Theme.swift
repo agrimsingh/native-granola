@@ -5,13 +5,13 @@ import SwiftUI
 /// Granola-style "oats" palette: warm paper surfaces, warm-tinted neutrals, an olive accent.
 /// Every token adapts to dark mode.
 enum Theme {
-    static let canvas = adaptive(0xF7F7F2, 0x1B1B19)
-    static let raised = adaptive(0xFFFFFF, 0x272725)
-    static let sunken = adaptive(0xF1F1EA, 0x161615)
-    static let sidebar = adaptive(0xEEEDE5, 0x222220)
+    static let canvas = adaptive(0xF7F7F2, 0x1D1C19)
+    static let raised = adaptive(0xFFFFFF, 0x2A2925)
+    static let sunken = adaptive(0xF1F1EA, 0x181714)
+    static let sidebar = adaptive(0xEEEDE5, 0x25241F)
 
-    static let ink = adaptive(0x292929, 0xECECE6)
-    static let inkSecondary = adaptive(0x6B6B67, 0x9E9E99)
+    static let ink = adaptive(0x292929, 0xEDECE6)
+    static let inkSecondary = adaptive(0x65645F, 0xA3A29B)
     static let inkTertiary = adaptive(0x8F8F8A, 0x85857F)
 
     static let accentInk = adaptive(0x5B6F00, 0xB2C455)

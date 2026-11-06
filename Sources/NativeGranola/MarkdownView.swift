@@ -72,8 +72,8 @@ struct MarkdownView: View {
         case let .todo(indent, done, text):
             row(indent: indent,
                 marker: Image(systemName: done ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 13))
-                    .foregroundStyle(done ? Theme.accentInk : Theme.inkTertiary),
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(done ? Theme.accentInk : Theme.inkSecondary),
                 text: text)
         case let .numbered(indent, number, text):
             row(indent: indent, marker: Text("\(number).").foregroundStyle(Theme.inkSecondary).monospacedDigit(), text: text)
@@ -81,7 +81,7 @@ struct MarkdownView: View {
             body(text)
                 .foregroundStyle(Theme.inkSecondary)
                 .padding(.leading, 14)
-                .overlay(alignment: .leading) { Rectangle().fill(Theme.hairline).frame(width: 1) }
+                .overlay(alignment: .leading) { Capsule().fill(Theme.accentInk.opacity(0.45)).frame(width: 2) }
         case let .paragraph(text):
             body(text)
         case .divider:

@@ -174,6 +174,7 @@ private struct NativeSelectionHidden: NSViewRepresentable {
 
 private struct SearchResultRow: View {
     let hits: [SearchHit]
+    @State private var expanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
@@ -183,28 +184,28 @@ private struct SearchResultRow: View {
                     .lineLimit(1)
                 Text(hits[0].meetingStartedAt, format: .dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute())
                     .font(.system(size: 11.5))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.inkSecondary)
             }
             let matches = hits.filter { $0.kind != .title }
-            ForEach(Array(matches.prefix(2).enumerated()), id: \.offset) { _, hit in
+            ForEach(Array(matches.prefix(expanded ? matches.count : 2).enumerated()), id: \.offset) { _, hit in
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Image(systemName: icon(hit.kind))
                         .font(.system(size: 9.5, weight: .medium))
                         .foregroundStyle(Theme.inkTertiary)
                         .frame(width: 12)
-                        .help(label(hit))
-                    Text(Self.snippet(hit))
+                        .accessibilityHidden(true)
+                    Text(snippet(hit))
                         .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.inkSecondary)
                         .lineLimit(2)
                 }
                 .accessibilityElement(children: .combine)
-                .accessibilityLabel("\(label(hit)): \(String(Self.snippet(hit).characters))")
             }
-            if matches.count > 2 {
-                Text("+\(matches.count - 2) more")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.inkTertiary)
+            if matches.count > 2 && !expanded {
+                Button("+\(matches.count - 2) more") { expanded = true }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Theme.accentInk)
                     .padding(.leading, 18)
             }
         }
@@ -229,15 +230,14 @@ private struct SearchResultRow: View {
         }
     }
 
-    /// Transcript matches lead with where they are in the call.
-    private static func snippet(_ hit: SearchHit) -> AttributedString {
-        var text = snippet(hit.snippet)
-        if hit.kind == .transcript, let offset = hit.startOffset {
-            var time = AttributedString(Transcript.timestamp(offset) + "  ")
-            time.foregroundColor = Theme.inkTertiary
-            text = time + text
-        }
-        return text
+    /// Each match leads with where it was found ("Transcript 00:23", "AI notes").
+    private func snippet(_ hit: SearchHit) -> AttributedString {
+        var place = label(hit)
+        if hit.kind == .transcript, let offset = hit.startOffset { place += " " + Transcript.timestamp(offset) }
+        var prefix = AttributedString(place + "  ")
+        prefix.foregroundColor = Theme.inkTertiary
+        prefix.font = .system(size: 11, weight: .medium).monospacedDigit()
+        return prefix + Self.snippet(hit.snippet)
     }
 
     /// Snippets are cut from markdown with the match wrapped in `**`; keep the emphasis but drop
@@ -268,7 +268,7 @@ private struct SidebarMessage: View {
     var body: some View {
         VStack(spacing: 4) {
             Text(title).font(.system(size: 13, weight: .medium))
-            Text(detail).font(.system(size: 12)).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            Text(detail).font(.system(size: 12)).foregroundStyle(Theme.inkSecondary).multilineTextAlignment(.center)
         }
         .padding(24)
     }
@@ -292,7 +292,7 @@ struct MeetingRow: View {
                             ElapsedTime(since: meeting.startedAt).foregroundStyle(Theme.danger)
                         }
                     } else {
-                        Text(subtitle).foregroundStyle(.secondary)
+                        Text(subtitle).foregroundStyle(Theme.inkSecondary)
                     }
                 }
                 .font(.system(size: 11.5))
