@@ -50,18 +50,23 @@ struct MeetingDetailView: View {
                 document(meeting, markdown: enhanced)
             } else {
                 VStack(alignment: .leading, spacing: 0) {
-                    header(meeting).readableColumn()
-                    editor(meeting).readableColumn()
+                    header(meeting).readableColumn(padding: pagePadding)
+                    editor(meeting).readableColumn(padding: pagePadding)
                 }
             }
-            LinearGradient(colors: [Theme.canvas.opacity(0), Theme.canvas], startPoint: .top, endPoint: .bottom)
-                .frame(height: 72)
-                .allowsHitTesting(false)
+            VStack(spacing: 0) {
+                LinearGradient(colors: [Theme.canvas.opacity(0), Theme.canvas], startPoint: .top, endPoint: .bottom)
+                    .frame(height: 40)
+                Theme.canvas.frame(height: 52)
+            }
+            .allowsHitTesting(false)
             NoteDock(meeting: meeting, isLive: isLive, showTranscript: $showTranscript)
                 .padding(.bottom, 20)
         }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { pageWidth = $0 }
     }
+
+    private var pagePadding: CGFloat { pageWidth < 480 ? 28 : Theme.pagePadding }
 
     private var titleSize: CGFloat {
         switch pageWidth {
@@ -78,7 +83,7 @@ struct MeetingDetailView: View {
                 header(meeting)
                 MarkdownView(markdown: markdown)
             }
-            .readableColumn()
+            .readableColumn(padding: pagePadding)
             .padding(.bottom, 110)
         }
     }
@@ -114,13 +119,16 @@ struct MeetingDetailView: View {
         ViewThatFits(in: .horizontal) {
             metadataRow(meeting, density: .full).fixedSize()
             metadataRow(meeting, density: .compact).fixedSize()
+            metadataRow(meeting, density: .tight).fixedSize()
             metadataRow(meeting, density: .minimal).fixedSize()
-            metadataRow(meeting, density: .minimal)
+            metadataRow(meeting, density: .micro).fixedSize()
+            metadataRow(meeting, density: .micro)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private enum MetaDensity { case full, compact, minimal }
+    /// Steps down in order: weekday, then time, then names become a count, then the app name goes.
+    private enum MetaDensity: Comparable { case full, compact, tight, minimal, micro }
 
     private func metadataRow(_ meeting: Meeting, density: MetaDensity) -> some View {
         let names = meeting.attendees.map(\.displayName)
@@ -140,6 +148,7 @@ struct MeetingDetailView: View {
                     ? .dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()
                     : density == .compact ? .dateTime.month(.abbreviated).day().hour().minute()
                     : .dateTime.month(.abbreviated).day()))
+                    .monospacedDigit()
                 if let duration = meeting.duration {
                     Text("·").foregroundStyle(Theme.inkTertiary)
                     Text(Self.duration(duration))
@@ -153,7 +162,8 @@ struct MeetingDetailView: View {
                     switch density {
                     case .full: Text(names.joined(separator: ", "))
                     case .compact: Text(People.short(meeting.attendees))
-                    case .minimal: if names.count > 3 { Text("+\(names.count - 3)") }
+                    case .tight, .minimal: Text(names.count == 1 ? People.short(meeting.attendees) : "\(names.count) people")
+                    case .micro: if names.count > 3 { Text("+\(names.count - 3)") }
                     }
                 }
                 .help(names.joined(separator: "\n"))
@@ -163,9 +173,10 @@ struct MeetingDetailView: View {
                     if let icon = AppInfo.icon(bundleID: app.id) {
                         Image(nsImage: icon).resizable().frame(width: 14, height: 14)
                     }
-                    if density != .minimal { Text(app.name) }
+                    if density < .minimal { Text(app.name) }
                 }
                 .help(app.name)
+                .accessibilityLabel(app.name)
             }
         }
     }
@@ -196,7 +207,7 @@ struct MeetingDetailView: View {
                 }
             }
             .padding(.horizontal, -5)
-            .padding(.bottom, 80)
+            .padding(.bottom, 100)
     }
 
     private func binding(_ keyPath: WritableKeyPath<Meeting, String>) -> Binding<String> {

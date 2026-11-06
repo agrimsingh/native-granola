@@ -185,29 +185,59 @@ private struct SearchResultRow: View {
                     .font(.system(size: 11.5))
                     .foregroundStyle(.secondary)
             }
-            ForEach(Array(hits.filter { $0.kind != .title }.prefix(2).enumerated()), id: \.offset) { _, hit in
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(label(hit))
-                        .font(.system(size: 10.5, weight: .medium))
-                        .foregroundStyle(.tertiary)
-                        .monospacedDigit()
-                    Text(Self.snippet(hit.snippet))
+            let matches = hits.filter { $0.kind != .title }
+            ForEach(Array(matches.prefix(2).enumerated()), id: \.offset) { _, hit in
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: icon(hit.kind))
+                        .font(.system(size: 9.5, weight: .medium))
+                        .foregroundStyle(Theme.inkTertiary)
+                        .frame(width: 12)
+                        .help(label(hit))
+                    Text(Self.snippet(hit))
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                 }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("\(label(hit)): \(String(Self.snippet(hit).characters))")
+            }
+            if matches.count > 2 {
+                Text("+\(matches.count - 2) more")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.inkTertiary)
+                    .padding(.leading, 18)
             }
         }
         .padding(.vertical, 4)
     }
 
-    private func label(_ hit: SearchHit) -> String {
-        switch hit.kind {
-        case .transcript: hit.startOffset.map { "Transcript · \(Transcript.timestamp($0))" } ?? "Transcript"
+    private func icon(_ kind: SearchHit.Kind) -> String {
+        switch kind {
+        case .transcript: "waveform"
+        case .enhancedNotes: "sparkles"
+        case .notes: "pencil"
+        case .title: "textformat"
+        }
+    }
+
+    private func label(_ kind: SearchHit) -> String {
+        switch kind.kind {
+        case .transcript: "Transcript"
         case .enhancedNotes: "AI notes"
         case .notes: "My notes"
         case .title: "Title"
         }
+    }
+
+    /// Transcript matches lead with where they are in the call.
+    private static func snippet(_ hit: SearchHit) -> AttributedString {
+        var text = snippet(hit.snippet)
+        if hit.kind == .transcript, let offset = hit.startOffset {
+            var time = AttributedString(Transcript.timestamp(offset) + "  ")
+            time.foregroundColor = Theme.inkTertiary
+            text = time + text
+        }
+        return text
     }
 
     /// Snippets are cut from markdown with the match wrapped in `**`; keep the emphasis but drop
@@ -222,7 +252,12 @@ private struct SearchResultRow: View {
             .filter { !$0.isEmpty }
             .joined(separator: " · ")
         let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        return (try? AttributedString(markdown: flat, options: options)) ?? AttributedString(flat)
+        var result = (try? AttributedString(markdown: flat, options: options)) ?? AttributedString(flat)
+        for run in result.runs where run.inlinePresentationIntent?.contains(.stronglyEmphasized) == true {
+            result[run.range].foregroundColor = Theme.ink
+            result[run.range].backgroundColor = Theme.selection
+        }
+        return result
     }
 }
 
@@ -250,10 +285,18 @@ struct MeetingRow: View {
                 Text(meeting.title)
                     .font(.system(size: 13, weight: .medium))
                     .lineLimit(1)
-                Text(subtitle)
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                Group {
+                    if isRecording {
+                        HStack(spacing: 0) {
+                            Text("Recording · ").foregroundStyle(Theme.danger)
+                            ElapsedTime(since: meeting.startedAt).foregroundStyle(Theme.danger)
+                        }
+                    } else {
+                        Text(subtitle).foregroundStyle(.secondary)
+                    }
+                }
+                .font(.system(size: 11.5))
+                .lineLimit(1)
             }
             Spacer(minLength: 4)
             if isRecording {
@@ -262,7 +305,7 @@ struct MeetingRow: View {
             } else if meeting.enhancedNotes != nil {
                 Image(systemName: "sparkles")
                     .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.inkTertiary)
                     .help("Has AI notes")
             }
         }

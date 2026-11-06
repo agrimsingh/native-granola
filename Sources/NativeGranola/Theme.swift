@@ -18,7 +18,7 @@ enum Theme {
     static let accentFill = adaptive(0x5B6F00, 0x6B8212)
     static let accentFillHover = adaptive(0x4C5616, 0x7A9418)
     static let accentGround = adaptive(0xEEF2D8, 0x2A3016)
-    static let selection = adaptive(0x6B7A1E, 0xB2C455, lightAlpha: 0.16, darkAlpha: 0.16)
+    static let selection = adaptive(0x6B7A1E, 0xB2C455, lightAlpha: 0.16, darkAlpha: 0.24)
     static let onAccent = Color(hex: 0xFCFCF8)
 
     static let danger = adaptive(0xD9532F, 0xE0613F)
@@ -59,9 +59,9 @@ extension Color {
 
 extension View {
     /// Centers content in a column of comfortable reading width.
-    func readableColumn() -> some View {
+    func readableColumn(padding: CGFloat = Theme.pagePadding) -> some View {
         frame(minWidth: 0, maxWidth: Theme.readableWidth, alignment: .leading)
-            .padding(.horizontal, Theme.pagePadding)
+            .padding(.horizontal, padding)
             .frame(minWidth: 0, maxWidth: .infinity)
     }
 }
@@ -212,7 +212,7 @@ struct RecordingDot: View {
         Circle()
             .fill(Theme.danger)
             .frame(width: 7, height: 7)
-            .phaseAnimator([1.0, 0.35]) { dot, opacity in dot.opacity(opacity) } animation: { _ in .easeInOut(duration: 0.9) }
+            .phaseAnimator([1.0, 0.6]) { dot, opacity in dot.opacity(opacity) } animation: { _ in .easeInOut(duration: 0.9) }
     }
 }
 
