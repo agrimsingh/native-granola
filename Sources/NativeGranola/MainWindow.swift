@@ -1,3 +1,4 @@
+import AppKit
 import GranolaCore
 import SwiftUI
 
@@ -78,15 +79,10 @@ struct MeetingList: View {
         @Bindable var state = state
         List(selection: $state.selectedMeetingID) {
             if !state.searchText.isEmpty {
-                ForEach(state.searchHits, id: \.self) { hit in
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(hit.meetingTitle).font(.system(size: 13, weight: .medium)).lineLimit(1)
-                        Text(snippet(hit.snippet)).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(2)
-                        Text(hit.meetingStartedAt, format: .dateTime.month(.abbreviated).day().hour().minute())
-                            .font(.system(size: 11)).foregroundStyle(.tertiary)
-                    }
-                    .padding(.vertical, 3)
-                    .tag(hit.meetingID)
+                ForEach(hitsByMeeting, id: \.first!.meetingID) { hits in
+                    SearchResultRow(hits: hits)
+                        .tag(hits[0].meetingID)
+                        .listRowBackground(SelectionBackground(selected: state.selectedMeetingID == hits[0].meetingID))
                 }
             } else {
                 ForEach(groups, id: \.title) { group in
@@ -94,6 +90,7 @@ struct MeetingList: View {
                         ForEach(group.meetings) { meeting in
                             MeetingRow(meeting: meeting, isRecording: state.recorder.isRecording && state.recorder.meeting?.id == meeting.id)
                                 .tag(meeting.id)
+                                .listRowBackground(SelectionBackground(selected: state.selectedMeetingID == meeting.id))
                                 .contextMenu {
                                     Button("Delete", role: .destructive) { state.delete(meeting) }
                                 }
@@ -104,6 +101,7 @@ struct MeetingList: View {
         }
         .scrollContentBackground(.hidden)
         .background(Theme.sidebar)
+        .background(NativeSelectionHidden())
         .overlay {
             if !state.searchText.isEmpty && state.searchHits.isEmpty {
                 SidebarMessage(title: "No results", detail: "Nothing in your notes or transcripts matches “\(state.searchText)”.")
@@ -113,8 +111,15 @@ struct MeetingList: View {
         }
     }
 
-    private func snippet(_ text: String) -> AttributedString {
-        (try? AttributedString(markdown: text)) ?? AttributedString(text)
+    /// One row per meeting so a single selection never highlights several rows.
+    private var hitsByMeeting: [[SearchHit]] {
+        var order: [String] = []
+        var byMeeting: [String: [SearchHit]] = [:]
+        for hit in state.searchHits {
+            if byMeeting[hit.meetingID] == nil { order.append(hit.meetingID) }
+            byMeeting[hit.meetingID, default: []].append(hit)
+        }
+        return order.compactMap { byMeeting[$0] }
     }
 
     private var groups: [(title: String, meetings: [Meeting])] {
@@ -127,6 +132,97 @@ struct MeetingList: View {
         return grouped
             .map { (title: $0.key, meetings: $0.value) }
             .sorted { ($0.meetings.first?.startedAt ?? .distantPast) > ($1.meetings.first?.startedAt ?? .distantPast) }
+    }
+}
+
+/// The sidebar's own selection fill, drawn in place of the system's accent-blue highlight.
+private struct SelectionBackground: View {
+    let selected: Bool
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .fill(selected ? Theme.selection : .clear)
+            .padding(.horizontal, 10)
+    }
+}
+
+/// Turns off the table view's selection drawing behind a SwiftUI `List`, keeping selection itself
+/// (clicks, arrow keys, accessibility) native.
+private struct NativeSelectionHidden: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { NSView() }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        DispatchQueue.main.async {
+            var ancestor = view.superview
+            for _ in 0..<6 {
+                guard let current = ancestor else { return }
+                if let table = Self.table(in: current) {
+                    if table.selectionHighlightStyle != .none { table.selectionHighlightStyle = .none }
+                    return
+                }
+                ancestor = current.superview
+            }
+        }
+    }
+
+    private static func table(in view: NSView) -> NSTableView? {
+        if let table = view as? NSTableView { return table }
+        for sub in view.subviews { if let table = table(in: sub) { return table } }
+        return nil
+    }
+}
+
+private struct SearchResultRow: View {
+    let hits: [SearchHit]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(hits[0].meetingTitle)
+                    .font(.system(size: 13, weight: .medium))
+                    .lineLimit(1)
+                Text(hits[0].meetingStartedAt, format: .dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute())
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(Array(hits.filter { $0.kind != .title }.prefix(2).enumerated()), id: \.offset) { _, hit in
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(label(hit))
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(.tertiary)
+                        .monospacedDigit()
+                    Text(Self.snippet(hit.snippet))
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func label(_ hit: SearchHit) -> String {
+        switch hit.kind {
+        case .transcript: hit.startOffset.map { "Transcript · \(Transcript.timestamp($0))" } ?? "Transcript"
+        case .enhancedNotes: "AI notes"
+        case .notes: "My notes"
+        case .title: "Title"
+        }
+    }
+
+    /// Snippets are cut from markdown with the match wrapped in `**`; keep the emphasis but drop
+    /// block syntax so headings and bullets don't run together.
+    static func snippet(_ text: String) -> AttributedString {
+        let flat = text
+            .split(whereSeparator: \.isNewline)
+            .map { line in
+                line.trimmingCharacters(in: .whitespaces)
+                    .replacing(#/^(#{1,6}\s+|[-*+]\s+(\[[ xX]\]\s+)?|\d+[.)]\s+|>\s*)/#, with: "")
+            }
+            .filter { !$0.isEmpty }
+            .joined(separator: " · ")
+        let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        return (try? AttributedString(markdown: flat, options: options)) ?? AttributedString(flat)
     }
 }
 
@@ -166,7 +262,7 @@ struct MeetingRow: View {
             } else if meeting.enhancedNotes != nil {
                 Image(systemName: "sparkles")
                     .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
                     .help("Has AI notes")
             }
         }

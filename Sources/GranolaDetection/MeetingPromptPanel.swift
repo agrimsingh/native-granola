@@ -143,67 +143,68 @@ struct PromptCardView: View {
     let onClose: () -> Void
     let onHover: (Bool) -> Void
 
-    private static let accent = Color(red: 0.36, green: 0.44, blue: 0.0)
-
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            AccentBar(dashed: !suggestion.isCalendar, color: Self.accent)
-                .frame(width: 4)
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    SourceIcon(bundleID: suggestion.micApp?.bundleID)
-                        .frame(width: 16, height: 16)
-                    Text(sourceLabel)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                    Spacer(minLength: 8)
-                    Button(action: onClose) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 10, weight: .bold))
-                            .frame(width: 18, height: 18)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                    .help("Dismiss")
-                }
-                Text(suggestion.title)
-                    .font(.headline)
-                    .lineLimit(2)
-                if !suggestion.subtitle.isEmpty {
-                    Text(suggestion.subtitle)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                }
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
+                SourceIcon(bundleID: suggestion.micApp?.bundleID)
+                    .frame(width: 14, height: 14)
+                Text(sourceLabel)
+                    .lineLimit(1)
+                Text("·")
                 TimelineView(.periodic(from: .now, by: 15)) { context in
                     Text(PromptTimeLabel.text(for: suggestion, now: context.date))
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(PromptPalette.accentInk)
+                        .lineLimit(1)
                 }
-                HStack(spacing: 8) {
-                    Button("Take notes", action: onTakeNotes)
-                        .buttonStyle(.borderedProminent)
-                        .tint(Self.accent)
-                    if let onJoin {
-                        Button("Join & take notes", action: onJoin)
-                            .buttonStyle(.bordered)
-                    }
+                .layoutPriority(1)
+                Spacer(minLength: 8)
+                Button(action: onClose) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .semibold))
+                        .frame(width: 20, height: 20)
+                        .contentShape(Circle())
                 }
-                .controlSize(.regular)
-                .padding(.top, 6)
+                .buttonStyle(.plain)
+                .foregroundStyle(PromptPalette.inkSecondary)
+                .help("Dismiss")
             }
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(PromptPalette.inkSecondary)
+
+            Text(suggestion.title)
+                .font(.system(size: 19, weight: .regular, design: .serif))
+                .tracking(-0.2)
+                .foregroundStyle(PromptPalette.ink)
+                .lineLimit(2)
+                .padding(.top, 8)
+            if !suggestion.subtitle.isEmpty {
+                Text(suggestion.subtitle)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(PromptPalette.inkSecondary)
+                    .lineLimit(2)
+                    .padding(.top, 2)
+            }
+            HStack(spacing: 8) {
+                if let onJoin {
+                    Button("Join & take notes", action: onJoin).buttonStyle(PromptButtonStyle(primary: true))
+                    Button("Take notes", action: onTakeNotes).buttonStyle(PromptButtonStyle(primary: false))
+                } else {
+                    Button("Take notes", action: onTakeNotes).buttonStyle(PromptButtonStyle(primary: true))
+                }
+            }
+            .padding(.top, 14)
         }
         .fixedSize(horizontal: false, vertical: true)
-        .padding(12)
+        .padding(.horizontal, 16)
+        .padding(.top, 12)
+        .padding(.bottom, 14)
         .frame(width: 320, alignment: .leading)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(PromptPalette.paper, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.08))
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(PromptPalette.hairline)
         )
-        .shadow(color: .black.opacity(0.2), radius: 12, y: 4)
+        .shadow(color: .black.opacity(0.16), radius: 18, y: 6)
         .padding(16)
         .onHover(perform: onHover)
     }
@@ -216,22 +217,46 @@ struct PromptCardView: View {
     }
 }
 
-private struct AccentBar: View {
-    let dashed: Bool
-    let color: Color
+/// The app's paper-and-olive palette, repeated here because this module can't see the app's theme.
+private enum PromptPalette {
+    static let paper = adaptive(0xFCFCF8, 0x272725)
+    static let ink = adaptive(0x292929, 0xECECE6)
+    static let inkSecondary = adaptive(0x6B6B67, 0xA3A39E)
+    static let accentInk = adaptive(0x5B6F00, 0xB2C455)
+    static let accentFill = adaptive(0x5B6F00, 0x6B8212)
+    static let accentFillPressed = adaptive(0x4C5616, 0x7A9418)
+    static let softFill = adaptive(0x625A22, 0xFFFFFF, lightAlpha: 0.08, darkAlpha: 0.08)
+    static let softFillPressed = adaptive(0x56512E, 0xFFFFFF, lightAlpha: 0.14, darkAlpha: 0.13)
+    static let hairline = adaptive(0x47432A, 0xFFFFFF, lightAlpha: 0.14, darkAlpha: 0.1)
+    static let onAccent = adaptive(0xFCFCF8, 0xFCFCF8)
 
-    var body: some View {
-        GeometryReader { geometry in
-            if dashed {
-                Path { path in
-                    path.move(to: CGPoint(x: geometry.size.width / 2, y: geometry.size.width / 2))
-                    path.addLine(to: CGPoint(x: geometry.size.width / 2, y: geometry.size.height - geometry.size.width / 2))
-                }
-                .stroke(color, style: StrokeStyle(lineWidth: geometry.size.width, lineCap: .round, dash: [5, 5]))
-            } else {
-                Capsule().fill(color)
-            }
+    private static func adaptive(_ light: UInt32, _ dark: UInt32, lightAlpha: CGFloat = 1, darkAlpha: CGFloat = 1) -> Color {
+        func color(_ hex: UInt32, _ alpha: CGFloat) -> NSColor {
+            NSColor(srgbRed: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255,
+                    blue: CGFloat(hex & 0xFF) / 255, alpha: alpha)
         }
+        return Color(nsColor: NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? color(dark, darkAlpha) : color(light, lightAlpha)
+        })
+    }
+}
+
+/// Pill buttons drawn by hand: the panel is never key, so system prominent buttons render inactive.
+private struct PromptButtonStyle: ButtonStyle {
+    let primary: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(primary ? PromptPalette.onAccent : PromptPalette.ink)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 7)
+            .background(
+                primary ? (configuration.isPressed ? PromptPalette.accentFillPressed : PromptPalette.accentFill)
+                        : (configuration.isPressed ? PromptPalette.softFillPressed : PromptPalette.softFill),
+                in: Capsule())
+            .contentShape(Capsule())
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
     }
 }
 

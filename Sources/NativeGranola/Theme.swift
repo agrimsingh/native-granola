@@ -12,12 +12,13 @@ enum Theme {
 
     static let ink = adaptive(0x292929, 0xECECE6)
     static let inkSecondary = adaptive(0x6B6B67, 0x9E9E99)
-    static let inkTertiary = adaptive(0x9A9A95, 0x72726E)
+    static let inkTertiary = adaptive(0x8F8F8A, 0x85857F)
 
     static let accentInk = adaptive(0x5B6F00, 0xB2C455)
     static let accentFill = adaptive(0x5B6F00, 0x6B8212)
     static let accentFillHover = adaptive(0x4C5616, 0x7A9418)
     static let accentGround = adaptive(0xEEF2D8, 0x2A3016)
+    static let selection = adaptive(0x6B7A1E, 0xB2C455, lightAlpha: 0.16, darkAlpha: 0.16)
     static let onAccent = Color(hex: 0xFCFCF8)
 
     static let danger = adaptive(0xD9532F, 0xE0613F)
@@ -190,11 +191,11 @@ struct DancingBars: View {
             }
             .animation(.easeOut(duration: 0.08), value: normalized)
         } else {
-            bars(color: Theme.inkSecondary) { Self.rest[$0] }
+            bars(color: .foreground.secondary) { Self.rest[$0] }
         }
     }
 
-    private func bars(color: Color, fraction: @escaping (Int) -> CGFloat) -> some View {
+    private func bars(color: some ShapeStyle, fraction: @escaping (Int) -> CGFloat) -> some View {
         HStack(alignment: .center, spacing: 2) {
             ForEach(Self.rest.indices, id: \.self) { index in
                 Capsule()

@@ -11,7 +11,7 @@ struct MarkdownView: View {
                 view(for: block, isFirst: index == 0)
             }
         }
-        .font(.system(size: 14))
+        .font(.system(size: 14.5))
         .lineSpacing(4.5)
         .foregroundStyle(Theme.ink)
         .tint(Theme.accentInk)
@@ -49,6 +49,11 @@ struct MarkdownView: View {
         return Text((try? AttributedString(markdown: text, options: options)) ?? AttributedString(text))
     }
 
+    /// Body text takes the whole column; sized to its ideal width, runs of bold wrap early.
+    private func body(_ text: String) -> some View {
+        inline(text).frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     @ViewBuilder
     private func view(for block: Block, isFirst: Bool) -> some View {
         switch block {
@@ -73,12 +78,12 @@ struct MarkdownView: View {
         case let .numbered(indent, number, text):
             row(indent: indent, marker: Text("\(number).").foregroundStyle(Theme.inkSecondary).monospacedDigit(), text: text)
         case let .quote(text):
-            inline(text)
+            body(text)
                 .foregroundStyle(Theme.inkSecondary)
                 .padding(.leading, 14)
                 .overlay(alignment: .leading) { Rectangle().fill(Theme.hairline).frame(width: 1) }
         case let .paragraph(text):
-            inline(text)
+            body(text)
         case .divider:
             Rectangle().fill(Theme.hairline).frame(height: 1).padding(.vertical, 10)
         }
@@ -87,7 +92,7 @@ struct MarkdownView: View {
     private func row(indent: Int, marker: some View, text: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             marker.frame(width: 14, alignment: .center)
-            inline(text)
+            body(text)
         }
         .padding(.leading, CGFloat(indent) * 24)
     }

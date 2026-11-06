@@ -8,6 +8,7 @@ struct MeetingDetailView: View {
     @State private var tab: Tab = .notes
     @State private var showTranscript = false
     @State private var saveTask: Task<Void, Never>?
+    @State private var pageWidth: CGFloat = 800
 
     enum Tab: String, CaseIterable { case enhanced = "AI notes", notes = "My notes" }
 
@@ -20,8 +21,10 @@ struct MeetingDetailView: View {
                     .frame(minWidth: 320, maxWidth: .infinity, maxHeight: .infinity)
                 if showTranscript {
                     Rectangle().fill(Theme.hairline).frame(width: 1)
+                        .ignoresSafeArea(.container, edges: .top)
                     TranscriptPanel(meeting: draft, isLive: isLive)
                         .frame(width: 320)
+                        .background { Theme.sunken.ignoresSafeArea(.container, edges: .top) }
                         .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }
@@ -34,6 +37,7 @@ struct MeetingDetailView: View {
             ToolbarSpacer(.flexible)
             ToolbarItemGroup {
                 IntelligenceActions(meetingID: meetingID)
+                    .tint(Theme.ink)
             }
         }
     }
@@ -56,6 +60,16 @@ struct MeetingDetailView: View {
             NoteDock(meeting: meeting, isLive: isLive, showTranscript: $showTranscript)
                 .padding(.bottom, 20)
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { pageWidth = $0 }
+    }
+
+    private var titleSize: CGFloat {
+        switch pageWidth {
+        case ..<560: 26
+        case ..<760: 29
+        case ..<1000: 32
+        default: 34
+        }
     }
 
     private func document(_ meeting: Meeting, markdown: String) -> some View {
@@ -73,7 +87,7 @@ struct MeetingDetailView: View {
         VStack(alignment: .leading, spacing: 14) {
             TextField("Untitled meeting", text: binding(\.title), axis: .vertical)
                 .textFieldStyle(.plain)
-                .font(Theme.serif(32))
+                .font(Theme.serif(titleSize))
                 .tracking(-0.5)
                 .lineLimit(1...3)
                 .foregroundStyle(Theme.ink)
@@ -94,45 +108,79 @@ struct MeetingDetailView: View {
         .padding(.bottom, 22)
     }
 
+    /// Pills never truncate: the row steps down to shorter wording until it fits, and only the
+    /// last resort is allowed to squeeze.
     private func metadata(_ meeting: Meeting) -> some View {
-        HStack(spacing: 6) {
-            MetaPill {
-                Image(systemName: "calendar")
-                Text(meeting.startedAt.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()))
-                if let duration = meeting.duration {
-                    Text("·").foregroundStyle(Theme.inkTertiary)
-                    Text(Duration.seconds(duration.rounded()).formatted(
-                        .units(allowed: [.hours, .minutes, .seconds], width: .narrow, maximumUnitCount: 2)))
-                }
-            }
-            .layoutPriority(1)
+        ViewThatFits(in: .horizontal) {
+            metadataRow(meeting, density: .full).fixedSize()
+            metadataRow(meeting, density: .compact).fixedSize()
+            metadataRow(meeting, density: .minimal).fixedSize()
+            metadataRow(meeting, density: .minimal)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private enum MetaDensity { case full, compact, minimal }
+
+    private func metadataRow(_ meeting: Meeting, density: MetaDensity) -> some View {
+        let names = meeting.attendees.map(\.displayName)
+        let app = meeting.sourceApp.flatMap { id in AppInfo.name(bundleID: id).map { (id: id, name: $0) } }
+        return HStack(spacing: 6) {
             if isLive {
                 MetaPill {
                     RecordingDot()
                     Text("Recording").foregroundStyle(Theme.danger)
                 }
+                .fixedSize()
+                .layoutPriority(2)
             }
-            if !meeting.attendees.isEmpty {
+            MetaPill {
+                Image(systemName: "calendar")
+                Text(meeting.startedAt.formatted(density == .full
+                    ? .dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()
+                    : density == .compact ? .dateTime.month(.abbreviated).day().hour().minute()
+                    : .dateTime.month(.abbreviated).day()))
+                if let duration = meeting.duration {
+                    Text("·").foregroundStyle(Theme.inkTertiary)
+                    Text(Self.duration(duration))
+                }
+            }
+            .layoutPriority(1)
+            .help(meeting.startedAt.formatted(date: .complete, time: .shortened))
+            if !names.isEmpty {
                 MetaPill {
                     AvatarStack(attendees: meeting.attendees, size: 15)
-                    Text(meeting.attendees.map(\.displayName).joined(separator: ", "))
+                    switch density {
+                    case .full: Text(names.joined(separator: ", "))
+                    case .compact: Text(People.short(meeting.attendees))
+                    case .minimal: if names.count > 3 { Text("+\(names.count - 3)") }
+                    }
                 }
-                .help(meeting.attendees.map(\.displayName).joined(separator: "\n"))
+                .help(names.joined(separator: "\n"))
             }
-            if let bundleID = meeting.sourceApp, let name = AppInfo.name(bundleID: bundleID) {
+            if let app {
                 MetaPill {
-                    if let icon = AppInfo.icon(bundleID: bundleID) {
+                    if let icon = AppInfo.icon(bundleID: app.id) {
                         Image(nsImage: icon).resizable().frame(width: 14, height: 14)
                     }
-                    Text(name)
+                    if density != .minimal { Text(app.name) }
                 }
+                .help(app.name)
             }
         }
     }
 
+    /// "31 min", "1 hr 5 min", "40 sec".
+    static func duration(_ seconds: TimeInterval) -> String {
+        let rounded = Duration.seconds(seconds.rounded())
+        return seconds < 60
+            ? rounded.formatted(.units(allowed: [.seconds], width: .abbreviated))
+            : rounded.formatted(.units(allowed: [.hours, .minutes], width: .abbreviated, maximumUnitCount: 2))
+    }
+
     private func editor(_ meeting: Meeting) -> some View {
         TextEditor(text: binding(\.rawNotes))
-            .font(.system(size: 14))
+            .font(.system(size: 14.5))
             .lineSpacing(4.5)
             .foregroundStyle(Theme.ink)
             .tint(Theme.accentInk)
@@ -141,7 +189,7 @@ struct MeetingDetailView: View {
                 if meeting.rawNotes.isEmpty {
                     Text(isLive ? "Jot down anything important. Native Granola is transcribing in the background."
                                 : "Write notes…")
-                        .font(.system(size: 14))
+                        .font(.system(size: 14.5))
                         .foregroundStyle(Theme.inkSecondary)
                         .padding(.leading, 5)
                         .allowsHitTesting(false)
@@ -241,10 +289,10 @@ struct NoteDock: View {
                     }
                 }
                 .font(.system(size: 12.5, weight: .medium))
-                .foregroundStyle(Theme.ink)
+                .foregroundStyle(showTranscript ? Theme.accentInk : Theme.ink)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 7)
-                .background(showTranscript ? Theme.softFill : .clear, in: Capsule())
+                .background(showTranscript ? Theme.accentGround : .clear, in: Capsule())
                 .contentShape(Capsule())
             }
             .buttonStyle(.plain)
@@ -324,12 +372,12 @@ struct TranscriptPanel: View {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 14) {
                             ForEach(TranscriptTurn.turns(segments)) { turn in
-                                Bubble(text: turn.text, source: turn.source, time: turn.start)
+                                Bubble(text: turn.text, source: turn.source, speaker: turn.speaker, time: turn.start)
                             }
                             if isLive {
                                 ForEach(TranscriptSource.allCases, id: \.self) { source in
                                     if let text = state.recorder.volatileText[source], !text.isEmpty {
-                                        Bubble(text: text, source: source, time: nil).opacity(0.55)
+                                        Bubble(text: text, source: source, speaker: source.speakerLabel, time: nil).opacity(0.55)
                                     }
                                 }
                             }
@@ -349,17 +397,18 @@ struct TranscriptPanel: View {
 struct TranscriptTurn: Identifiable {
     let id: String
     let source: TranscriptSource
+    let speaker: String
     let start: TimeInterval
     var text: String
 
     static func turns(_ segments: [TranscriptSegment]) -> [TranscriptTurn] {
         var turns: [TranscriptTurn] = []
         for segment in segments.sorted(by: { $0.startOffset < $1.startOffset }) {
-            if let last = turns.last, last.source == segment.source {
+            if let last = turns.last, last.source == segment.source, last.speaker == segment.displaySpeaker {
                 turns[turns.count - 1].text += " " + segment.text
             } else {
-                turns.append(TranscriptTurn(id: segment.id, source: segment.source, start: segment.startOffset,
-                                            text: segment.text))
+                turns.append(TranscriptTurn(id: segment.id, source: segment.source, speaker: segment.displaySpeaker,
+                                            start: segment.startOffset, text: segment.text))
             }
         }
         return turns
@@ -369,6 +418,7 @@ struct TranscriptTurn: Identifiable {
 struct Bubble: View {
     let text: String
     let source: TranscriptSource
+    let speaker: String
     let time: TimeInterval?
 
     var body: some View {
@@ -377,7 +427,7 @@ struct Bubble: View {
             if mine { Spacer(minLength: 32) }
             VStack(alignment: mine ? .trailing : .leading, spacing: 4) {
                 if let time {
-                    Text("\(source.speakerLabel) · \(Transcript.timestamp(time))")
+                    Text("\(speaker) · \(Transcript.timestamp(time))")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(Theme.inkSecondary)
                         .monospacedDigit()
