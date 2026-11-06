@@ -4,6 +4,7 @@ import SwiftUI
 struct MeetingDetailView: View {
     let meetingID: String
     @Environment(AppState.self) private var state
+    @Environment(WindowLayout.self) private var layout: WindowLayout?
     @State private var draft: Meeting?
     @State private var tab: Tab = .notes
     @State private var showTranscript = false
@@ -31,6 +32,7 @@ struct MeetingDetailView: View {
             }
         }
         .animation(.easeOut(duration: 0.2), value: showTranscript)
+        .onChange(of: showTranscript, initial: true) { layout?.transcriptOpen = showTranscript }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { detailWidth = $0 }
         .background(Theme.canvas)
         .onAppear(perform: load)
@@ -84,7 +86,7 @@ struct MeetingDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 header(meeting)
-                MarkdownView(markdown: markdown)
+                MarkdownView(markdown: markdown, bodySize: pageWidth >= 1000 ? 15 : 14.5)
             }
             .readableColumn(padding: pagePadding)
             .padding(.bottom, 110)
@@ -259,14 +261,14 @@ struct NoteTabSwitcher: View {
                     withAnimation(.easeOut(duration: 0.18)) { tab = option }
                 } label: {
                     Text(option.rawValue)
-                        .font(.system(size: 12.5, weight: .medium))
+                        .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(tab == option ? Theme.ink : Theme.inkSecondary)
-                        .padding(.horizontal, 12)
+                        .padding(.horizontal, 13)
                         .padding(.vertical, 5)
                         .background {
                             if tab == option {
                                 Capsule()
-                                    .fill(Theme.raised)
+                                    .fill(Theme.segmentSelected)
                                     .shadow(color: .black.opacity(0.08), radius: 1.5, y: 1)
                                     .matchedGeometryEffect(id: "selection", in: selection)
                             }

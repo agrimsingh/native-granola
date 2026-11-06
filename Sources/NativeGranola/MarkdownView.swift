@@ -4,6 +4,7 @@ import SwiftUI
 /// lists, quotes and paragraphs, with inline bold/italic/code/links.
 struct MarkdownView: View {
     let markdown: String
+    var bodySize: CGFloat = 14.5
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
@@ -11,8 +12,8 @@ struct MarkdownView: View {
                 view(for: block, isFirst: index == 0)
             }
         }
-        .font(.system(size: 14.5))
-        .lineSpacing(4.5)
+        .font(.system(size: bodySize))
+        .lineSpacing(bodySize * 0.32)
         .foregroundStyle(Theme.ink)
         .tint(Theme.accentInk)
         .textSelection(.enabled)
@@ -62,7 +63,7 @@ struct MarkdownView: View {
                 .font(Theme.serif(level <= 1 ? 23 : level == 2 ? 20 : 18))
                 .tracking(-0.2)
                 .lineSpacing(0)
-                .padding(.top, isFirst ? 0 : 20)
+                .padding(.top, isFirst ? 0 : 22)
                 .padding(.bottom, 1)
         case let .bullet(indent, text):
             row(indent: indent,

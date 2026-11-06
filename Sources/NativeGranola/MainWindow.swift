@@ -2,14 +2,27 @@ import AppKit
 import GranolaCore
 import SwiftUI
 
+/// Window-level layout facts the detail pane reports up to the split view.
+@Observable final class WindowLayout {
+    var transcriptOpen = false
+}
+
 struct MainWindow: View {
     @Environment(AppState.self) private var state
+    @State private var layout = WindowLayout()
+    @State private var columns: NavigationSplitViewVisibility = .all
+    @State private var sidebarAutoHidden = false
+    @State private var sidebarKeptByUser = false
+    @State private var windowWidth: CGFloat = 1200
+
+    /// Below this width, opening the transcript hides the sidebar so the note keeps a readable column.
+    private static let threePaneMinWidth: CGFloat = 1000
 
     var body: some View {
         @Bindable var state = state
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columns) {
             MeetingList()
-                .navigationSplitViewColumnWidth(min: 240, ideal: 270)
+                .navigationSplitViewColumnWidth(min: 260, ideal: 280, max: 360)
                 .toolbar {
                     ToolbarItem(placement: .primaryAction) {
                         if state.recorder.isRecording {
@@ -39,11 +52,37 @@ struct MainWindow: View {
         .searchable(text: $state.searchText, placement: .sidebar, prompt: "Search notes and transcripts")
         .onChange(of: state.searchText) { state.runSearch() }
         .tint(Theme.accentFill)
+        .environment(layout)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { windowWidth = $0 }
+        .onChange(of: layout.transcriptOpen) { _, open in
+            if !open { sidebarKeptByUser = false }
+            fitColumns()
+        }
+        .onChange(of: windowWidth) { fitColumns() }
+        .onChange(of: columns) { _, visibility in
+            guard visibility != .detailOnly, sidebarAutoHidden else { return }
+            sidebarAutoHidden = false
+            sidebarKeptByUser = true
+        }
+    }
+
+    /// Hides the sidebar while three panes don't fit, and brings it back only if it was hidden here.
+    /// Showing it again by hand wins until the transcript closes.
+    private func fitColumns() {
+        let cramped = layout.transcriptOpen && windowWidth < Self.threePaneMinWidth
+        if cramped, columns != .detailOnly, !sidebarAutoHidden, !sidebarKeptByUser {
+            sidebarAutoHidden = true
+            withAnimation(.easeOut(duration: 0.2)) { columns = .detailOnly }
+        } else if !cramped, sidebarAutoHidden {
+            sidebarAutoHidden = false
+            withAnimation(.easeOut(duration: 0.2)) { columns = .all }
+        }
     }
 }
 
 private struct EmptyDetail: View {
     @Environment(AppState.self) private var state
+    @Environment(WindowLayout.self) private var layout: WindowLayout?
 
     var body: some View {
         VStack(spacing: 12) {
@@ -69,6 +108,7 @@ private struct EmptyDetail: View {
         .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.canvas)
+        .onAppear { layout?.transcriptOpen = false }
     }
 }
 
@@ -80,13 +120,13 @@ struct MeetingList: View {
         List(selection: $state.selectedMeetingID) {
             if !state.searchText.isEmpty {
                 ForEach(hitsByMeeting, id: \.first!.meetingID) { hits in
-                    SearchResultRow(hits: hits)
+                    SearchResultRow(hits: hits, query: state.searchText)
                         .tag(hits[0].meetingID)
                         .listRowBackground(SelectionBackground(selected: state.selectedMeetingID == hits[0].meetingID))
                 }
             } else {
                 ForEach(groups, id: \.title) { group in
-                    Section(group.title) {
+                    Section {
                         ForEach(group.meetings) { meeting in
                             MeetingRow(meeting: meeting, isRecording: state.recorder.isRecording && state.recorder.meeting?.id == meeting.id)
                                 .tag(meeting.id)
@@ -95,6 +135,10 @@ struct MeetingList: View {
                                     Button("Delete", role: .destructive) { state.delete(meeting) }
                                 }
                         }
+                    } header: {
+                        Text(group.title)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Theme.inkSecondary)
                     }
                 }
             }
@@ -174,6 +218,7 @@ private struct NativeSelectionHidden: NSViewRepresentable {
 
 private struct SearchResultRow: View {
     let hits: [SearchHit]
+    let query: String
     @State private var expanded = false
 
     var body: some View {
@@ -237,12 +282,14 @@ private struct SearchResultRow: View {
         var prefix = AttributedString(place + "  ")
         prefix.foregroundColor = Theme.inkTertiary
         prefix.font = .system(size: 11, weight: .medium).monospacedDigit()
-        return prefix + Self.snippet(hit.snippet)
+        return prefix + Self.snippet(hit.snippet, query: query)
     }
 
-    /// Snippets are cut from markdown with the match wrapped in `**`; keep the emphasis but drop
-    /// block syntax so headings and bullets don't run together.
-    static func snippet(_ text: String) -> AttributedString {
+    /// Snippets are cut from markdown with the match wrapped in `**`. Block syntax is dropped so
+    /// headings and bullets don't run together, and only bold runs that contain a query term are
+    /// highlighted; bold from the notes themselves goes back to plain text.
+    static func snippet(_ text: String, query: String) -> AttributedString {
+        let terms = query.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init)
         let flat = text
             .split(whereSeparator: \.isNewline)
             .map { line in
@@ -254,8 +301,13 @@ private struct SearchResultRow: View {
         let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
         var result = (try? AttributedString(markdown: flat, options: options)) ?? AttributedString(flat)
         for run in result.runs where run.inlinePresentationIntent?.contains(.stronglyEmphasized) == true {
-            result[run.range].foregroundColor = Theme.ink
-            result[run.range].backgroundColor = Theme.selection
+            let words = String(result[run.range].characters).lowercased()
+            if terms.contains(where: { words.contains($0) }) {
+                result[run.range].foregroundColor = Theme.ink
+                result[run.range].backgroundColor = Theme.match
+            } else {
+                result[run.range].inlinePresentationIntent = nil
+            }
         }
         return result
     }
