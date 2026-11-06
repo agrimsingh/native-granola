@@ -102,6 +102,8 @@ struct MeetingList: View {
                 }
             }
         }
+        .scrollContentBackground(.hidden)
+        .background(Theme.sidebar)
         .overlay {
             if !state.searchText.isEmpty && state.searchHits.isEmpty {
                 SidebarMessage(title: "No results", detail: "Nothing in your notes or transcripts matches “\(state.searchText)”.")

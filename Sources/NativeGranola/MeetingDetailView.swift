@@ -99,10 +99,14 @@ struct MeetingDetailView: View {
             MetaPill {
                 Image(systemName: "calendar")
                 Text(meeting.startedAt.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()))
+                if let duration = meeting.duration {
+                    Text("·").foregroundStyle(Theme.inkTertiary)
+                    Text(Duration.seconds(duration.rounded()).formatted(
+                        .units(allowed: [.hours, .minutes, .seconds], width: .narrow, maximumUnitCount: 2)))
+                }
             }
-            if let duration = meeting.duration {
-                MetaPill { Text(Transcript.timestamp(duration)).monospacedDigit() }
-            } else if isLive {
+            .layoutPriority(1)
+            if isLive {
                 MetaPill {
                     RecordingDot()
                     Text("Recording").foregroundStyle(Theme.danger)
