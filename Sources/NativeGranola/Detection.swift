@@ -71,24 +71,32 @@ struct UpcomingMeetingsSection: View {
             } label: {
                 Label("Connect calendar", systemImage: "calendar.badge.plus")
             }
-            .buttonStyle(.link)
+            .buttonStyle(PillButtonStyle(kind: .soft, compact: true))
         } else if !upcoming.isEmpty {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Coming up").font(.caption).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 8) {
+                MenuSectionTitle("Coming up")
                 ForEach(Array(upcoming)) { event in
-                    HStack {
-                        RoundedRectangle(cornerRadius: 1.5).fill(.green).frame(width: 3, height: 26)
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        Text(event.start.formatted(date: .omitted, time: .shortened))
+                            .font(.system(size: 12))
+                            .monospacedDigit()
+                            .foregroundStyle(Theme.inkSecondary)
+                            .frame(width: 58, alignment: .leading)
                         VStack(alignment: .leading, spacing: 1) {
-                            Text(event.displayTitle).lineLimit(1)
-                            Text("\(event.start.formatted(date: .omitted, time: .shortened)) · \(event.participantCount) people")
-                                .font(.caption).foregroundStyle(.secondary)
+                            Text(event.displayTitle)
+                                .font(.system(size: 13))
+                                .foregroundStyle(Theme.ink)
+                                .lineLimit(1)
+                            Text("\(event.participantCount) people")
+                                .font(.system(size: 11.5))
+                                .foregroundStyle(Theme.inkSecondary)
                         }
-                        Spacer()
+                        Spacer(minLength: 6)
                         if !state.recorder.isRecording {
                             Button("Start") {
                                 Task { await DetectionCoordinator.shared.startMeeting(event: event) }
                             }
-                            .controlSize(.small)
+                            .buttonStyle(PillButtonStyle(kind: .soft, compact: true))
                         }
                     }
                 }

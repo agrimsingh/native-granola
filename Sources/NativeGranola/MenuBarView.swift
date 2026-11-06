@@ -10,7 +10,7 @@ struct MenuBarView: View {
     @Environment(\.openSettings) private var openSettings
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 16) {
             header
             if state.recorder.isRecording, let meeting = state.recorder.meeting {
                 RecordingCard(meeting: meeting, recorder: state.recorder)
@@ -21,28 +21,41 @@ struct MenuBarView: View {
                         showMainWindow(openWindow)
                     }
                 } label: {
-                    Label("Start new note", systemImage: "plus.circle.fill")
+                    Label("Start new note", systemImage: "square.and.pencil")
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
+                .buttonStyle(PillButtonStyle(kind: .accent))
                 .disabled(state.recorder.state == .preparing)
             }
             if let error = state.lastError {
-                Text(error).font(.caption).foregroundStyle(.red).lineLimit(3)
+                HStack(alignment: .firstTextBaseline, spacing: 7) {
+                    Image(systemName: "exclamationmark.circle.fill").foregroundStyle(Theme.danger)
+                    Text(error).foregroundStyle(Theme.ink).lineLimit(3)
+                }
+                .font(.system(size: 12))
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.danger.opacity(0.1), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
             ExtraMenuSections()
             recent
-            Divider()
-            footer
+            VStack(spacing: 10) {
+                Rectangle().fill(Theme.hairline).frame(height: 1)
+                footer
+            }
         }
-        .padding(14)
+        .padding(16)
         .frame(width: 320)
+        .background(Theme.canvas)
+        .tint(Theme.accentFill)
     }
 
     private var header: some View {
         HStack {
-            Text("Native Granola").font(.headline)
+            Text("Native Granola")
+                .font(Theme.serif(18))
+                .tracking(-0.2)
+                .foregroundStyle(Theme.ink)
             Spacer()
             if state.recorder.state == .preparing {
                 ProgressView().controlSize(.small)
@@ -54,43 +67,62 @@ struct MenuBarView: View {
     private var recent: some View {
         let recent = state.meetings.filter { !$0.isInProgress }.prefix(5)
         if !recent.isEmpty {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Recent").font(.caption).foregroundStyle(.secondary)
-                ForEach(Array(recent)) { meeting in
-                    Button {
-                        state.selectedMeetingID = meeting.id
-                        showMainWindow(openWindow)
-                    } label: {
-                        HStack {
-                            Text(meeting.title).lineLimit(1)
-                            Spacer()
-                            Text(meeting.startedAt, format: .dateTime.month(.abbreviated).day())
-                                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 4) {
+                MenuSectionTitle("Recent")
+                VStack(spacing: 0) {
+                    ForEach(Array(recent)) { meeting in
+                        Button {
+                            state.selectedMeetingID = meeting.id
+                            showMainWindow(openWindow)
+                        } label: {
+                            HStack(spacing: 8) {
+                                Text(meeting.title)
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(Theme.ink)
+                                    .lineLimit(1)
+                                Spacer(minLength: 8)
+                                Text(meeting.startedAt, format: .dateTime.month(.abbreviated).day())
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(Theme.inkSecondary)
+                            }
+                            .hoverHighlight()
                         }
-                        .contentShape(Rectangle())
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
-                    .padding(.vertical, 3)
                 }
+                .padding(.horizontal, -8)
             }
         }
     }
 
     private var footer: some View {
-        HStack {
+        HStack(spacing: 2) {
             Button("Open notes") { showMainWindow(openWindow) }
+                .buttonStyle(PillButtonStyle(kind: .soft, compact: true))
             Spacer()
             Button {
                 NSApp.activate()
                 openSettings()
-            } label: { Image(systemName: "gearshape") }
+            } label: { Image(systemName: "gearshape").frame(width: 26, height: 22) }
             .help("Settings")
             Button {
                 NSApp.terminate(nil)
-            } label: { Image(systemName: "power") }
+            } label: { Image(systemName: "power").frame(width: 26, height: 22) }
             .help("Quit")
         }
         .buttonStyle(.borderless)
+        .foregroundStyle(Theme.inkSecondary)
+    }
+}
+
+struct MenuSectionTitle: View {
+    let title: String
+    init(_ title: String) { self.title = title }
+
+    var body: some View {
+        Text(title)
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(Theme.inkSecondary)
     }
 }
 
@@ -107,34 +139,41 @@ struct RecordingCard: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Circle().fill(.red).frame(width: 8, height: 8)
-                Text(meeting.title).font(.subheadline.weight(.semibold)).lineLimit(1)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                RecordingDot()
+                Text(meeting.title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Theme.ink)
+                    .lineLimit(1)
                 Spacer()
-                TimelineView(.periodic(from: .now, by: 1)) { context in
-                    Text(Transcript.timestamp(context.date.timeIntervalSince(meeting.startedAt)))
-                        .monospacedDigit().foregroundStyle(.secondary)
-                }
+                ElapsedTime(since: meeting.startedAt)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(Theme.inkSecondary)
             }
-            HStack(spacing: 12) {
+            HStack(spacing: 18) {
                 LevelMeter(label: "Me", level: recorder.levels[.microphone] ?? 0)
                 LevelMeter(label: "Them", level: recorder.levels[.system] ?? 0)
             }
             if let last = recorder.volatileText.values.first ?? recorder.segments.last?.text {
-                Text(last).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                Text(last)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.inkSecondary)
+                    .lineLimit(2)
             }
             HStack {
-                Button("Open") { showMainWindow(openWindow) }
+                Button("Open note") { showMainWindow(openWindow) }
+                    .buttonStyle(PillButtonStyle(kind: .soft, compact: true))
                 Spacer()
-                Button(role: .destructive) {
+                Button {
                     Task { await state.stopMeeting() }
                 } label: { Label("Stop", systemImage: "stop.fill") }
-                .tint(.red)
+                .buttonStyle(PillButtonStyle(kind: .danger, compact: true))
             }
         }
-        .padding(10)
-        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
+        .padding(14)
+        .background(Theme.raised, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .shadow(color: .black.opacity(0.07), radius: 8, y: 2)
     }
 }
 
@@ -144,15 +183,10 @@ struct LevelMeter: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Text(label).font(.caption2).foregroundStyle(.secondary).frame(width: 30, alignment: .leading)
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(.quaternary)
-                    Capsule().fill(.green)
-                        .frame(width: geo.size.width * CGFloat(min(1, sqrt(Double(level)) * 2.5)))
-                }
-            }
-            .frame(height: 5)
+            DancingBars(level: level, height: 12)
+            Text(label)
+                .font(.system(size: 11.5, weight: .medium))
+                .foregroundStyle(Theme.inkSecondary)
         }
     }
 }

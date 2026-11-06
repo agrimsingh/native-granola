@@ -143,7 +143,7 @@ struct PromptCardView: View {
     let onClose: () -> Void
     let onHover: (Bool) -> Void
 
-    private static let accent = Color(red: 0.42, green: 0.66, blue: 0.33)
+    private static let accent = Color(red: 0.36, green: 0.44, blue: 0.0)
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
