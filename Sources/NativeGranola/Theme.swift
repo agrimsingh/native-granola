@@ -43,7 +43,7 @@ struct MetaChip<Leading: View>: View {
 extension MetaChip where Leading == Image {
     init(_ text: String, systemImage: String) {
         self.text = text
-        self.leading = { Image(systemName: systemImage) }
+        self.leading = Image(systemName: systemImage)
     }
 }
 
