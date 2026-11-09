@@ -130,10 +130,21 @@ public final class SystemAudioCapture: @unchecked Sendable {
         self.format = format
         log.info("System tap started (\(String(describing: self.scope), privacy: .public), \(self.tappedProcesses.count) processes): \(format, privacy: .public) via output \(outputUID, privacy: .public)")
 
+        let log = log
+        var layout: [UInt32]?
         try check("Create IOProc", AudioDeviceCreateIOProcIDWithBlock(&procID, aggregateID, ioQueue) { _, input, _, _, _ in
-            guard let view = AVAudioPCMBuffer(pcmFormat: format, bufferListNoCopy: input, deallocator: nil),
-                  view.frameLength > 0, let copy = view.deepCopy() else { return }
-            handler(copy)
+            // Say once per layout what the device delivers, loudly if it can't be used: dropping
+            // every buffer otherwise looks exactly like a silent far side.
+            let channels = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input)).map(\.mNumberChannels)
+            if channels != layout {
+                layout = channels
+                if TapInput.endsWithTap(channels, format: format) {
+                    log.info("System tap input buffers: \(channels, privacy: .public) channels")
+                } else {
+                    log.error("System tap input has buffers of \(channels, privacy: .public) channels, which don't end with \(format, privacy: .public)")
+                }
+            }
+            if let copy = TapInput.copy(from: input, format: format) { handler(copy) }
         })
         try check("Start aggregate device", AudioDeviceStart(aggregateID, procID))
     }
@@ -251,20 +262,44 @@ public final class SystemAudioCapture: @unchecked Sendable {
     }
 }
 
-extension AVAudioPCMBuffer {
-    /// Copies the samples out of a buffer whose memory is only valid for the duration of a callback.
-    func deepCopy() -> AVAudioPCMBuffer? {
-        guard let copy = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameLength) else { return nil }
-        copy.frameLength = frameLength
-        let src = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: audioBufferList))
-        let dst = UnsafeMutableAudioBufferListPointer(copy.mutableAudioBufferList)
-        for (s, d) in zip(src, dst) {
-            guard let sData = s.mData, let dData = d.mData else { continue }
-            memcpy(dData, sData, Int(min(s.mDataByteSize, d.mDataByteSize)))
+/// Picks the tap's audio out of what the aggregate device hands its IOProc. The device delivers
+/// one buffer per input stream, and the output device it is clocked by can have input streams of
+/// its own, which come first: the built-in speakers and Bluetooth headphones both gain one while
+/// the microphone runs voice processing. The tap's stream is last.
+enum TapInput {
+    /// How many buffers a stream in `format` occupies: one per channel unless interleaved.
+    private static func bufferCount(_ format: AVAudioFormat) -> Int {
+        format.isInterleaved ? 1 : Int(format.channelCount)
+    }
+
+    /// Whether buffers with these channel counts end with audio shaped like `format`.
+    static func endsWithTap(_ channels: [UInt32], format: AVAudioFormat) -> Bool {
+        let count = bufferCount(format)
+        return count > 0 && channels.count >= count
+            && channels.suffix(count).allSatisfy { $0 == (format.isInterleaved ? format.channelCount : 1) }
+    }
+
+    /// Copies the tap's samples, whose memory is only valid for the duration of the callback.
+    /// Returns nil when there is no audio or the trailing buffers don't have the tap format's shape.
+    static func copy(from input: UnsafePointer<AudioBufferList>, format: AVAudioFormat) -> AVAudioPCMBuffer? {
+        let buffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input))
+        let bytesPerFrame = Int(format.streamDescription.pointee.mBytesPerFrame)
+        guard bytesPerFrame > 0, endsWithTap(buffers.map(\.mNumberChannels), format: format) else { return nil }
+        let tap = buffers[(buffers.count - bufferCount(format))...]
+        let frames = Int(tap.map(\.mDataByteSize).min() ?? 0) / bytesPerFrame
+        guard frames > 0, let copy = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frames)) else {
+            return nil
+        }
+        copy.frameLength = AVAudioFrameCount(frames)
+        for (source, destination) in zip(tap, UnsafeMutableAudioBufferListPointer(copy.mutableAudioBufferList)) {
+            guard let from = source.mData, let to = destination.mData else { return nil }
+            memcpy(to, from, frames * bytesPerFrame)
         }
         return copy
     }
+}
 
+extension AVAudioPCMBuffer {
     /// Root-mean-square level of the first channel, 0...1.
     public var rmsLevel: Float {
         guard let data = floatChannelData, frameLength > 0 else { return 0 }
