@@ -1,5 +1,6 @@
 import Foundation
 import SQLite3
+import Synchronization
 import Testing
 @testable import GranolaCore
 
@@ -58,6 +59,50 @@ import Testing
         try store.upsertMeeting(m)
         #expect(try store.search("Old").isEmpty)
         #expect(try store.search("New").count == 1)
+    }
+
+    @Test func updateMeetingChangesOnlyWhatItIsAskedTo() throws {
+        let store = try Store.inMemory()
+        let m = Meeting(title: "Agrim 1:1", rawNotes: "ask about launch")
+        try store.upsertMeeting(m)
+        let stale = try #require(try store.meeting(id: m.id))  // an editor's copy, read before the notes arrive
+
+        try store.updateMeeting(id: m.id) {
+            $0.enhancedNotes = "## Summary"
+            $0.templateID = "general"
+        }
+        let saved = try store.updateMeeting(id: m.id) {
+            $0.title = stale.title
+            $0.rawNotes = stale.rawNotes + "\nfollow up Thursday"
+        }
+
+        let loaded = try #require(try store.meeting(id: m.id))
+        #expect(loaded.enhancedNotes == "## Summary")
+        #expect(loaded.templateID == "general")
+        #expect(loaded.rawNotes == "ask about launch\nfollow up Thursday")
+        #expect(saved == loaded)
+        #expect(try store.search("Thursday").count == 1)
+        #expect(try store.search("Summary").count == 1)
+    }
+
+    @Test func updateMeetingLeavesAMissingMeetingMissing() throws {
+        let store = try Store.inMemory()
+        #expect(try store.updateMeeting(id: "gone") { $0.title = "Back" } == nil)
+        #expect(try store.meeting(id: "gone") == nil)
+    }
+
+    @Test func updateMeetingAnnouncesOnlyRealChanges() throws {
+        let store = try Store.inMemory()
+        let m = Meeting(title: "Sync")
+        try store.upsertMeeting(m)
+        let changes = Mutex(0)
+        let observer = NotificationCenter.default.addObserver(forName: Store.didChangeNotification, object: store,
+                                                              queue: nil) { _ in changes.withLock { $0 += 1 } }
+        defer { NotificationCenter.default.removeObserver(observer) }
+        try store.updateMeeting(id: m.id) { $0.title = "Sync" }
+        #expect(changes.withLock { $0 } == 0)
+        try store.updateMeeting(id: m.id) { $0.title = "Weekly sync" }
+        #expect(changes.withLock { $0 } == 1)
     }
 
     @Test func deleteCascades() throws {

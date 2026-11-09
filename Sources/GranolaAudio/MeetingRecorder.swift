@@ -26,6 +26,9 @@ public final class MeetingRecorder {
     }
 
     public private(set) var state: State = .idle
+    /// The meeting being recorded, from `start` until `stop` returns; nil otherwise. Once a meeting
+    /// has ended the store has the only copy, so later changes to it (AI notes, edits) are never
+    /// hidden or undone by one kept here.
     public private(set) var meeting: Meeting?
     public private(set) var segments: [TranscriptSegment] = []
     public private(set) var volatileText: [TranscriptSource: String] = [:]
@@ -79,31 +82,40 @@ public final class MeetingRecorder {
                               locale: locale, vocabulary: vocabulary)
             try await startSources(initial: true)
             state = .recording
+            log.notice("Recording meeting \(meeting.id, privacy: .public)")
         } catch {
             log.error("Failed to start recording: \(String(describing: error))")
             await teardown()
+            self.meeting = nil
             state = .failed(String(describing: error))
         }
     }
 
     /// Stops capture, waits for the final words to be transcribed, closes the audio files and marks
     /// the meeting ended (at `endedAt`, default now). When this returns the archive files are complete.
+    /// Returns the ended meeting, or nil if nothing was being recorded.
     @discardableResult
     public func stop(endedAt: Date? = nil) async -> Meeting? {
-        guard state == .recording || state == .preparing else { return meeting }
+        guard state == .recording || state == .preparing else { return nil }
         state = .stopping
         let end = endedAt ?? Date()
         await teardown(end: end)
-        if var meeting {
-            meeting.endedAt = end
-            try? store.upsertMeeting(meeting)
-            self.meeting = meeting
+        var ended = meeting
+        ended?.endedAt = end
+        if let id = meeting?.id {
+            do {
+                ended = try store.updateMeeting(id: id) { $0.endedAt = end } ?? ended
+            } catch {
+                log.error("Marking meeting \(id, privacy: .public) ended failed: \(String(describing: error))")
+            }
+            log.notice("Stopped recording meeting \(id, privacy: .public) after \(Int(end.timeIntervalSince(ended?.startedAt ?? end)), privacy: .public) s")
         }
+        meeting = nil
         volatileText = [:]
         levels = [:]
         isSuspended = false
         state = .idle
-        return meeting
+        return ended
     }
 
     /// Pauses capture without ending the meeting, e.g. before the Mac sleeps. Pending words are
@@ -139,17 +151,15 @@ public final class MeetingRecorder {
 
     /// Update the user's raw notes for the in-progress meeting.
     public func updateNotes(_ notes: String) {
-        guard var meeting else { return }
-        meeting.rawNotes = notes
-        self.meeting = meeting
-        try? store.upsertMeeting(meeting)
+        guard let id = meeting?.id else { return }
+        meeting?.rawNotes = notes
+        _ = try? store.updateMeeting(id: id) { $0.rawNotes = notes }
     }
 
     public func updateTitle(_ title: String) {
-        guard var meeting else { return }
-        meeting.title = title
-        self.meeting = meeting
-        try? store.upsertMeeting(meeting)
+        guard let id = meeting?.id else { return }
+        meeting?.title = title
+        _ = try? store.updateMeeting(id: id) { $0.title = title }
     }
 
     private var isFailed: Bool {

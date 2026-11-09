@@ -103,28 +103,55 @@ public final class Store: @unchecked Sendable {
 
     // MARK: Meetings
 
+    /// Writes the whole meeting, creating it if needed. To change part of an existing meeting use
+    /// `updateMeeting`, which can't undo what was saved since the caller's copy was read.
     public func upsertMeeting(_ m: Meeting) throws {
-        try locked {
-            let attendees = String(decoding: try JSONEncoder().encode(m.attendees), as: UTF8.self)
-            try run("""
-                INSERT INTO meetings (id, title, started_at, ended_at, calendar_event_id, attendees_json,
-                    source_app, raw_notes, enhanced_notes, template_id, folder, notion_page_url, updated_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
-                ON CONFLICT(id) DO UPDATE SET
-                    title=excluded.title, started_at=excluded.started_at, ended_at=excluded.ended_at,
-                    calendar_event_id=excluded.calendar_event_id, attendees_json=excluded.attendees_json,
-                    source_app=excluded.source_app, raw_notes=excluded.raw_notes,
-                    enhanced_notes=excluded.enhanced_notes, template_id=excluded.template_id,
-                    folder=excluded.folder, notion_page_url=excluded.notion_page_url,
-                    updated_at=excluded.updated_at
-                """,
-                m.id, m.title, m.startedAt, m.endedAt, m.calendarEventID, attendees, m.sourceApp,
-                m.rawNotes, m.enhancedNotes, m.templateID, m.folder, m.notionPageURL, Date())
-            try run("DELETE FROM meetings_fts WHERE meeting_id = ?", m.id)
-            try run("INSERT INTO meetings_fts (meeting_id, title, raw_notes, enhanced_notes) VALUES (?,?,?,?)",
-                    m.id, m.title, m.rawNotes, m.enhancedNotes ?? "")
-        }
+        try locked { try writeMeeting(m) }
         notify(m.id)
+    }
+
+    /// Applies `change` to the meeting as it is stored now and saves the result, as one step.
+    /// Several parts of the app hold a copy of a meeting for a while (the recorder, the note editor,
+    /// note generation); each changes only its own fields here, so none overwrites another's with
+    /// an old copy. Returns the meeting as saved, or nil if it no longer exists.
+    @discardableResult
+    public func updateMeeting(id: String, _ change: (inout Meeting) -> Void) throws -> Meeting? {
+        var changed = false
+        let meeting: Meeting? = try locked {
+            guard let stored = try query("SELECT \(Self.meetingColumns) FROM meetings WHERE id = ?", id,
+                                         map: Self.meeting).first else { return nil }
+            var updated = stored
+            change(&updated)
+            updated.id = id
+            if updated != stored {
+                try writeMeeting(updated)
+                changed = true
+            }
+            return updated
+        }
+        if changed { notify(id) }
+        return meeting
+    }
+
+    private func writeMeeting(_ m: Meeting) throws {
+        let attendees = String(decoding: try JSONEncoder().encode(m.attendees), as: UTF8.self)
+        try run("""
+            INSERT INTO meetings (id, title, started_at, ended_at, calendar_event_id, attendees_json,
+                source_app, raw_notes, enhanced_notes, template_id, folder, notion_page_url, updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(id) DO UPDATE SET
+                title=excluded.title, started_at=excluded.started_at, ended_at=excluded.ended_at,
+                calendar_event_id=excluded.calendar_event_id, attendees_json=excluded.attendees_json,
+                source_app=excluded.source_app, raw_notes=excluded.raw_notes,
+                enhanced_notes=excluded.enhanced_notes, template_id=excluded.template_id,
+                folder=excluded.folder, notion_page_url=excluded.notion_page_url,
+                updated_at=excluded.updated_at
+            """,
+            m.id, m.title, m.startedAt, m.endedAt, m.calendarEventID, attendees, m.sourceApp,
+            m.rawNotes, m.enhancedNotes, m.templateID, m.folder, m.notionPageURL, Date())
+        try run("DELETE FROM meetings_fts WHERE meeting_id = ?", m.id)
+        try run("INSERT INTO meetings_fts (meeting_id, title, raw_notes, enhanced_notes) VALUES (?,?,?,?)",
+                m.id, m.title, m.rawNotes, m.enhancedNotes ?? "")
     }
 
     public func meeting(id: String) throws -> Meeting? {

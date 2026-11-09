@@ -30,17 +30,31 @@ enum Intelligence {
 extension AppState {
     /// Generates AI notes, streaming them into `streamingNotes` so the UI can show progress.
     func generateNotes(meetingID: String, templateID: String? = nil) async {
-        guard var meeting = try? store.meeting(id: meetingID), !enhancing.contains(meetingID) else { return }
+        guard beginNotes(meetingID) else { return }
+        defer { endNotes(meetingID) }
+        await writeNotes(meetingID: meetingID, templateID: templateID)
+    }
+
+    /// Marks the meeting's notes as being written, which the note shows in place of its content.
+    /// False if they already are.
+    func beginNotes(_ meetingID: String) -> Bool {
+        guard enhancing.insert(meetingID).inserted else { return false }
+        streamingNotes[meetingID] = ""
+        return true
+    }
+
+    func endNotes(_ meetingID: String) {
+        enhancing.remove(meetingID)
+        streamingNotes[meetingID] = nil
+    }
+
+    /// Call between `beginNotes` and `endNotes`.
+    func writeNotes(meetingID: String, templateID: String? = nil) async {
+        guard var meeting = try? store.meeting(id: meetingID) else { return }
         let segments = (try? store.segments(meetingID: meetingID)) ?? []
         guard !segments.isEmpty || !meeting.rawNotes.isEmpty else {
             lastError = "Nothing to summarize yet: the transcript and notes are empty."
             return
-        }
-        enhancing.insert(meetingID)
-        streamingNotes[meetingID] = ""
-        defer {
-            enhancing.remove(meetingID)
-            streamingNotes[meetingID] = nil
         }
         do {
             let enhancer = NoteEnhancer(client: try Intelligence.client())
@@ -55,16 +69,22 @@ extension AppState {
                 text += delta
                 streamingNotes[meetingID] = text
             }
-            meeting.enhancedNotes = NoteEnhancer.cleanOutput(text)
-            meeting.templateID = template.id
-            save(meeting)
+            // Only what was generated is saved; the title and notes may have been edited meanwhile.
+            let notes = NoteEnhancer.cleanOutput(text)
+            let title = meeting.title
+            try store.updateMeeting(id: meetingID) {
+                $0.enhancedNotes = notes
+                $0.templateID = template.id
+                if Self.needsTitle($0) { $0.title = title }
+            }
+            refresh()  // so the note shows the result as the streamed text goes away
         } catch {
             report(error)
         }
     }
 
     func exportToNotion(meetingID: String) async {
-        guard var meeting = try? store.meeting(id: meetingID) else { return }
+        guard let meeting = try? store.meeting(id: meetingID) else { return }
         exporting.insert(meetingID)
         defer { exporting.remove(meetingID) }
         do {
@@ -77,16 +97,10 @@ extension AppState {
             }
             let url = try await notion.exportMeeting(meeting, segments: (try? store.segments(meetingID: meetingID)) ?? [],
                                                      databaseID: databaseID)
-            meeting.notionPageURL = url.absoluteString
-            save(meeting)
+            try store.updateMeeting(id: meetingID) { $0.notionPageURL = url.absoluteString }
         } catch {
             report(error)
         }
-    }
-
-    func postProcess(_ meeting: Meeting) async {
-        guard Preferences.autoEnhance, Intelligence.hasXAIKey else { return }
-        await generateNotes(meetingID: meeting.id)
     }
 
     static func needsTitle(_ meeting: Meeting) -> Bool {

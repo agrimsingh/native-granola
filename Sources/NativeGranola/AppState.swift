@@ -57,7 +57,7 @@ final class AppState {
 
     var selectedMeeting: Meeting? {
         guard let id = selectedMeetingID else { return nil }
-        if recorder.meeting?.id == id { return recorder.meeting }
+        if let recording = recorder.meeting, recording.id == id { return recording }
         return meetings.first { $0.id == id } ?? (try? store.meeting(id: id))
     }
 
@@ -93,8 +93,12 @@ final class AppState {
 
     /// Runs once the recorder has stopped and the meeting's audio files are closed.
     func afterMeetingEnded(_ meeting: Meeting) async {
+        // When notes will be written, the note says so from the moment the call ends, rather than
+        // offering to generate notes that are already on their way.
+        let writesNotes = Preferences.autoEnhance && Intelligence.hasXAIKey && beginNotes(meeting.id)
+        defer { if writesNotes { endNotes(meeting.id) } }
         if AudioArchive.hasAudio(meetingID: meeting.id) { await meetingAudioReady(meeting) }
-        await postProcess(meeting)
+        if writesNotes { await writeNotes(meetingID: meeting.id) }
     }
 
     /// The meeting's audio is complete at `AudioArchive.url(meetingID:source:)`: 16 kHz mono Float32,
@@ -106,12 +110,19 @@ final class AppState {
 
     // MARK: Editing
 
+    /// Saves what the note editor changes: the title and the user's own notes. `meeting` is the
+    /// editor's copy and can be older than the stored one, so nothing else is taken from it.
     func update(_ meeting: Meeting) {
         if recorder.meeting?.id == meeting.id {
             recorder.updateTitle(meeting.title)
             recorder.updateNotes(meeting.rawNotes)
         } else {
-            save(meeting)
+            do {
+                try store.updateMeeting(id: meeting.id) {
+                    $0.title = meeting.title
+                    $0.rawNotes = meeting.rawNotes
+                }
+            } catch { report(error) }
         }
     }
 
