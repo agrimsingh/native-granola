@@ -13,7 +13,7 @@ Your Mac already hears both sides of a call: your voice comes in through the mic
 - **Transcription** uses Apple's on-device `SpeechAnalyzer` (macOS 26). It is free, private and streams words as they're spoken. The audio is also saved for 7 days under `~/Library/Application Support/NativeGranola/Audio` for processing after the call. You can turn that off or change how long it's kept.
 - **After the call**, the saved audio is transcribed again with NVIDIA's Parakeet model, which made 28% fewer errors than Apple's model in [our benchmark](docs/asr-benchmark.md), and about five times fewer on noisy meeting audio. The far side's voices are then separated into Speaker 1, Speaker 2 and so on, and Grok matches them to attendee names when the conversation makes it clear. Both run on-device through [FluidAudio](https://github.com/FluidInference/FluidAudio). The models, about 0.5 GB, download the first time they're needed.
 - **Notes** come from Grok, through the xAI API, once the call ends. It works from the transcript, your typed notes and the calendar event. Templates shape the output for 1:1s, sales calls, standups, interviews and more.
-- **Meeting detection** watches your calendar and shows a prompt a minute before events with two or more attendees. It also notices when Zoom, Teams, Slack, FaceTime or a browser starts using the microphone, and offers to take notes. When that app releases the mic, the app stops recording and writes the notes.
+- **Meeting detection** watches your calendar and shows a prompt a minute before events with two or more attendees. It also notices when Zoom, Teams, Slack, FaceTime or a browser starts using the microphone, and offers to take notes. When that app releases the mic, the app stops recording and writes the notes. A meeting started from a calendar prompt or by hand belongs to no app at first: an app becomes the one whose hang-up ends it only after holding the mic for a full minute, so dictation or an app that opens the mic for a moment doesn't end the meeting.
 - **Storage** is a local SQLite database with full-text search, at `~/Library/Application Support/NativeGranola/granola.sqlite`.
 
 ## Requirements
@@ -102,6 +102,7 @@ The code lives in six modules:
 ## Limitations
 
 - A meeting in a browser tab records the whole browser, so a video in another tab of the same browser lands in the transcript. A meeting started while no app is using the microphone records all system audio.
+- A meeting started from the calendar or by hand, where no app holds the microphone for a minute (an in-person meeting, say), never stops on its own. Stop it yourself.
 - Speaker labels only appear after the call; during it, everyone on the far side is "Them". Similar voices are sometimes merged into one speaker.
 - Live transcription supports whatever languages Apple's on-device model supports for your locale. The after-call pass with Parakeet covers 25 European languages; meetings in other languages keep the live transcript.
 - Echo cancellation starts, but hasn't been tested on a real call over speakers. The call-detection prompts and Notion export pass their tests but have had little real-world use. Speaker separation has only been tested on synthetic voices.

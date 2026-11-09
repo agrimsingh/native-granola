@@ -350,6 +350,7 @@ private struct Harness {
         var h = Harness()
         h.micApps = [zoom]
         h.isRecording = true
+        h.recordingApp = zoom.bundleID
         _ = h.run(through: 10)
         h.micApps = []
         _ = h.run(through: 25)
@@ -361,6 +362,7 @@ private struct Harness {
         var h = Harness()
         h.micApps = [zoom]
         h.isRecording = true
+        h.recordingApp = zoom.bundleID
         _ = h.run(through: 10)
         h.micApps = []
         #expect(h.run(through: 50).filter { $0.output.likelyEnded != nil }.map(\.time) == [30])
@@ -385,9 +387,56 @@ private struct Harness {
         h.isRecording = true  // user took notes from a calendar prompt before joining
         _ = h.run(through: 30)
         h.micApps = [zoom]
-        _ = h.run(through: 60)
+        _ = h.run(through: 120)
         h.micApps = []
-        #expect(h.run(through: 100).filter { $0.output.likelyEnded != nil }.map(\.time) == [80])
+        #expect(h.run(through: 200).filter { $0.output.likelyEnded != nil }.map(\.time) == [140])
+    }
+
+    /// An in-person meeting started from the calendar: eight minutes in, Zoom opens the mic for a
+    /// second while looking for a room to share to. The meeting carries on.
+    @Test func momentaryMicUseDoesNotEndACalendarMeeting() {
+        var h = Harness()
+        h.isRecording = true
+        _ = h.run(through: 494)
+        h.micApps = [zoom]
+        _ = h.run(through: 496)
+        h.micApps = []
+        #expect(h.run(through: 1800).allSatisfy { $0.output.likelyEnded == nil })
+    }
+
+    @Test func micUseShorterThanAMinuteIsNotAdopted() {
+        var h = Harness()
+        h.isRecording = true
+        h.micApps = [slack]
+        _ = h.run(through: 59)  // first seen at t=1
+        h.micApps = []
+        #expect(h.run(through: 300).allSatisfy { $0.output.likelyEnded == nil })
+        // A later call that does last becomes the trigger.
+        h.micApps = [zoom]
+        _ = h.run(through: 400)
+        h.micApps = []
+        #expect(h.run(through: 500).compactMap(\.output.likelyEnded).map(\.app) == [zoom])
+    }
+
+    @Test func callAlreadyUnderWayIsAdoptedWhenRecordingStarts() {
+        var h = Harness()
+        h.micApps = [zoom]
+        _ = h.run(through: 90)
+        h.isRecording = true  // started by hand, not from the prompt
+        _ = h.run(through: 95)
+        h.micApps = []
+        #expect(h.run(through: 200).filter { $0.output.likelyEnded != nil }.map(\.time) == [115])
+    }
+
+    @Test func appNamedByThePromptIsNotHeldToTheMinimum() {
+        var h = Harness()
+        h.micApps = [zoom]
+        _ = h.run(through: 5)
+        h.isRecording = true
+        h.recordingApp = zoom.bundleID  // the user accepted "Meeting detected"
+        _ = h.run(through: 10)
+        h.micApps = []
+        #expect(h.run(through: 60).filter { $0.output.likelyEnded != nil }.map(\.time) == [30])
     }
 
     @Test func prefersPromptedAppAsTrigger() {
@@ -395,11 +444,11 @@ private struct Harness {
         h.micApps = [chrome]
         _ = h.run(through: 1)
         h.micApps = [chrome, zoom]
-        _ = h.run(through: 20)  // chrome was prompted at t=4; zoom joined the cluster quietly
+        _ = h.run(through: 80)  // chrome was prompted at t=4; zoom joined the cluster quietly
         h.isRecording = true
-        _ = h.run(through: 30)
+        _ = h.run(through: 90)
         h.micApps = [zoom]
-        let ended = h.run(through: 60).compactMap(\.output.likelyEnded)
+        let ended = h.run(through: 120).compactMap(\.output.likelyEnded)
         #expect(ended.map(\.app) == [chrome])
     }
 
@@ -417,9 +466,23 @@ private struct Harness {
         var h = Harness(DetectionConfiguration(likelyEndedDelay: 5))
         h.micApps = [zoom]
         h.isRecording = true
+        h.recordingApp = zoom.bundleID
         _ = h.run(through: 10)
         h.micApps = []
         #expect(h.run(through: 30).filter { $0.output.likelyEnded != nil }.map(\.time) == [15])
+    }
+
+    @Test func minimumSessionIsConfigurable() {
+        var h = Harness(DetectionConfiguration(inferredTriggerMinimumSession: 10))
+        h.isRecording = true
+        h.micApps = [zoom]
+        _ = h.run(through: 9)  // first seen at t=1
+        h.micApps = []
+        #expect(h.run(through: 100).allSatisfy { $0.output.likelyEnded == nil })
+        h.micApps = [zoom]
+        _ = h.run(through: 111)  // a 10 s session from t=101
+        h.micApps = []
+        #expect(h.run(through: 200).filter { $0.output.likelyEnded != nil }.map(\.time) == [131])
     }
 }
 

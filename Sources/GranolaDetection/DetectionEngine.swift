@@ -110,6 +110,10 @@ public struct DetectionConfiguration: Sendable, Hashable {
     public var linkLookahead: TimeInterval
     /// While recording, the triggering app being inactive this long emits a "likely ended" signal.
     public var likelyEndedDelay: TimeInterval
+    /// When a recording wasn't started from an app (a calendar prompt, a manual start), an app
+    /// becomes its trigger only once it has held the mic continuously this long. A moment of mic
+    /// use, such as dictation or Zoom listening for a nearby room, never ends the meeting.
+    public var inferredTriggerMinimumSession: TimeInterval
     public var calendarPromptsEnabled: Bool
     public var adHocPromptsEnabled: Bool
 
@@ -123,6 +127,7 @@ public struct DetectionConfiguration: Sendable, Hashable {
         linkLookback: TimeInterval = 15 * 60,
         linkLookahead: TimeInterval = 5 * 60,
         likelyEndedDelay: TimeInterval = 20,
+        inferredTriggerMinimumSession: TimeInterval = 60,
         calendarPromptsEnabled: Bool = true,
         adHocPromptsEnabled: Bool = true
     ) {
@@ -135,6 +140,7 @@ public struct DetectionConfiguration: Sendable, Hashable {
         self.linkLookback = linkLookback
         self.linkLookahead = linkLookahead
         self.likelyEndedDelay = likelyEndedDelay
+        self.inferredTriggerMinimumSession = inferredTriggerMinimumSession
         self.calendarPromptsEnabled = calendarPromptsEnabled
         self.adHocPromptsEnabled = adHocPromptsEnabled
     }
@@ -203,6 +209,9 @@ public struct DetectionEngine: Sendable {
     private var lastAdHocBundleID: String?
     private var wasRecording = false
     private var trigger: RecordingTrigger?
+    /// The app last prompted for, if it was on the mic when the recording began: the first choice
+    /// when the trigger has to be inferred.
+    private var promptedAtStart: String?
 
     public init(configuration: DetectionConfiguration = DetectionConfiguration()) {
         self.configuration = configuration
@@ -220,6 +229,7 @@ public struct DetectionEngine: Sendable {
             output.likelyEnded = updateRecording(input, active: active)
         } else {
             trigger = nil
+            promptedAtStart = nil
             if configuration.calendarPromptsEnabled, let suggestion = calendarPrompt(input) {
                 output.suggestions.append(suggestion)
             }
@@ -263,8 +273,14 @@ public struct DetectionEngine: Sendable {
             let app = active[override] ?? sessions[override]?.app ?? MicApp(bundleID: override, name: AppIdentity.friendlyNames[override] ?? override)
             trigger = RecordingTrigger(app: app, lastSeen: active[override] != nil ? now : nil, signaled: false)
         } else if trigger == nil {
-            let preferred = (!wasRecording ? lastAdHocBundleID : nil).flatMap { active[$0] }
-            if let app = preferred ?? Self.prioritized(Array(active.values), sessions: sessions).first {
+            if !wasRecording { promptedAtStart = lastAdHocBundleID.flatMap { active[$0]?.bundleID } }
+            let established = active.values.filter { app in
+                sessions[app.bundleID].map {
+                    now.timeIntervalSince($0.start) >= configuration.inferredTriggerMinimumSession
+                } ?? false
+            }
+            let preferred = established.first { $0.bundleID == promptedAtStart }
+            if let app = preferred ?? Self.prioritized(established, sessions: sessions).first {
                 trigger = RecordingTrigger(app: app, lastSeen: now, signaled: false)
             }
         }

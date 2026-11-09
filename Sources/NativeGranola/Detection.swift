@@ -1,6 +1,7 @@
 import AppKit
 import GranolaCore
 import GranolaDetection
+import os
 import SwiftUI
 
 /// Connects meeting detection (calendar + mic activity) to recording.
@@ -9,6 +10,7 @@ final class DetectionCoordinator {
     static let shared = DetectionCoordinator()
     let detector = MeetingDetector()
     var openMainWindow: (() -> Void)?
+    private let log = Logger(subsystem: "com.nativegranola", category: "detection")
 
     private init() {}
 
@@ -22,8 +24,10 @@ final class DetectionCoordinator {
                 self.detector.dismiss(suggestion)
             })
         }
-        detector.onLikelyEnded = {
+        detector.onLikelyEnded = { [detector, log] in
             guard Preferences.autoStop, state.recorder.isRecording else { return }
+            let app = detector.lastEndSignal?.app.name ?? "The meeting app"
+            log.notice("\(app, privacy: .public) released the microphone; stopping the recording")
             Task { await state.stopMeeting() }
         }
         detector.start()
