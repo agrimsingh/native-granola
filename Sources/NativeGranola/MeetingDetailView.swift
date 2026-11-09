@@ -5,8 +5,8 @@ import SwiftUI
 struct MeetingDetailView: View {
     let meetingID: String
     @Environment(AppState.self) private var state
-    @State private var draft: Meeting?
-    @State private var tab: Tab = .notes
+    @State private var draft: Meeting
+    @State private var tab: Tab
     @State private var saveTask: Task<Void, Never>?
     @State private var pageWidth: CGFloat = 800
 
@@ -14,21 +14,26 @@ struct MeetingDetailView: View {
 
     private var isLive: Bool { state.recorder.isRecording && state.recorder.meeting?.id == meetingID }
 
+    /// The note starts from `meeting` rather than loading it once on screen: a view with nothing
+    /// to show has nothing for `onAppear` to fire on, which left the whole pane blank.
+    init(meeting: Meeting) {
+        meetingID = meeting.id
+        _draft = State(initialValue: meeting)
+        _tab = State(initialValue: meeting.enhancedNotes != nil ? .enhanced : .notes)
+    }
+
     var body: some View {
-        Group {
-            if let draft { page(draft) }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Theme.canvas)
-        .onAppear(perform: load)
-        .onChange(of: state.meetings) { refreshFromStore() }
-        .toolbar {
-            ToolbarSpacer(.flexible)
-            ToolbarItemGroup {
-                IntelligenceActions(meetingID: meetingID)
-                    .tint(Theme.ink)
+        page(draft)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Theme.canvas)
+            .onChange(of: state.meetings) { refreshFromStore() }
+            .toolbar {
+                ToolbarSpacer(.flexible)
+                ToolbarItemGroup {
+                    IntelligenceActions(meetingID: meetingID)
+                        .tint(Theme.ink)
+                }
             }
-        }
     }
 
     private func page(_ meeting: Meeting) -> some View {
@@ -216,22 +221,17 @@ struct MeetingDetailView: View {
 
     private func binding(_ keyPath: WritableKeyPath<Meeting, String>) -> Binding<String> {
         Binding(
-            get: { draft?[keyPath: keyPath] ?? "" },
+            get: { draft[keyPath: keyPath] },
             set: { value in
-                draft?[keyPath: keyPath] = value
+                draft[keyPath: keyPath] = value
                 scheduleSave()
             })
-    }
-
-    private func load() {
-        draft = state.selectedMeeting
-        tab = draft?.enhancedNotes != nil ? .enhanced : .notes
     }
 
     /// Pick up changes made elsewhere (AI notes, Notion URL) without clobbering in-progress typing.
     private func refreshFromStore() {
         guard saveTask == nil, let latest = state.selectedMeeting, latest.id == meetingID else { return }
-        let hadEnhanced = draft?.enhancedNotes != nil
+        let hadEnhanced = draft.enhancedNotes != nil
         draft = latest
         if !hadEnhanced, latest.enhancedNotes != nil { tab = .enhanced }
     }
@@ -240,7 +240,7 @@ struct MeetingDetailView: View {
         saveTask?.cancel()
         saveTask = Task {
             try? await Task.sleep(for: .milliseconds(400))
-            guard !Task.isCancelled, let draft else { return }
+            guard !Task.isCancelled else { return }
             state.update(draft)
             saveTask = nil
         }

@@ -28,7 +28,7 @@ struct MainWindow: View {
                 }
         } detail: {
             if let meeting = state.selectedMeeting {
-                MeetingDetailView(meetingID: meeting.id)
+                MeetingDetailView(meeting: meeting)
                     .id(meeting.id)
             } else {
                 EmptyDetail()
